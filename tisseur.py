@@ -2,24 +2,25 @@
 """
 Tisseur — cours Hacking 101
 
-Tisse ensemble les outils des 6 modules (Reconnaissance, Scanning,
-Énumération, Exploitation, Post-Exploitation, Outils Avancés) : il
-les exécute UN PAR UN, en attendant que chaque étape soit
-complètement terminée avant de passer à la suivante, puis tisse
-tous les résultats en un seul rapport final (.md).
+Tisse ensemble les outils des modules (Reconnaissance, Scanning,
+Énumération, Exploitation, Outils Avancés) : il les exécute UN PAR
+UN, en attendant que chaque étape soit complètement terminée avant
+de passer à la suivante, puis tisse tous les résultats en un seul
+rapport final (.md).
 
-USAGE :
-    python3 tisseur.py --target <ip> [--url <url>] [--modules <liste>]
+TROIS FAÇONS DE LE LANCER :
+    python3 tisseur.py                          -> menu interactif (terminal)
+    python3 tisseur.py --gui                    -> interface graphique (fenêtre)
+    python3 tisseur.py --target <ip> [options]  -> mode direct (scripts/automatisation)
 
-EXEMPLES :
-    # Rouler le pipeline complet sur ton lab Metasploitable2
+EXEMPLES (mode direct) :
     python3 tisseur.py --target 192.168.56.102
-
-    # Rouler juste certains modules
     python3 tisseur.py --target 192.168.56.102 --modules Reconnaissance,Scanning
-
-    # Préciser une URL différente pour les outils web
     python3 tisseur.py --target 192.168.56.102 --url http://192.168.56.102:8080
+    python3 tisseur.py --guide
+
+L'interface graphique a besoin de Tkinter. Sur Kali, si c'est pas
+déjà installé : sudo apt install python3-tk
 
 ⚠️ À utiliser seulement sur des machines que tu possèdes ou que t'as
 le droit explicite de tester (ton lab Metasploitable2, etc.)
@@ -29,15 +30,16 @@ import argparse
 import subprocess
 import sys
 import datetime
+import threading
+import queue
 
 # ============================================================
-# BANNIÈRE ASCII — même police (figlet "slant") que tes autres
-# outils (scan-info-id-espion), colorée rouge/blanc comme le logo
+# BANNIÈRE ASCII (terminal) — figlet "slant", même rouge que le logo
 # ============================================================
 RESET = "\033[0m"
-WHITE = "\033[1;97m"
-RED_BRIGHT = "\033[1;91m"
-RED_DARK = "\033[2;31m"
+ROUGE = "\033[1;38;2;232;17;45m"   # #E8112D
+ROUGE_HEX = "#E8112D"
+NOIR_HEX = "#0a0a0a"
 
 LOGO_TISSEUR = r"""
   ____________________ ________  ______
@@ -47,30 +49,18 @@ LOGO_TISSEUR = r"""
 /_/ /___//____/____/_____/\____/_/ |_|
 """
 
+
 def print_banner():
     use_color = sys.stdout.isatty()
-
     lines = LOGO_TISSEUR.strip("\n").split("\n")
     width = max(len(l) for l in lines)
-    n = len(lines)
 
-    for i, line in enumerate(lines):
-        if not use_color:
-            print(line)
-            continue
-        # dégradé du haut (blanc, highlight) vers le bas (rouge foncé,
-        # ombre) — même logique que le relief 3D du logo
-        if i < n * 0.3:
-            color = WHITE
-        elif i < n * 0.75:
-            color = RED_BRIGHT
-        else:
-            color = RED_DARK
-        print(f"{color}{line}{RESET}")
+    for line in lines:
+        print(f"{ROUGE}{line}{RESET}" if use_color else line)
 
     tagline = "— tisse tes commandes de pentest, une à la fois —"
     tagline = tagline.center(width)
-    print(f"{RED_BRIGHT}{tagline}{RESET}" if use_color else tagline)
+    print(f"{ROUGE}{tagline}{RESET}" if use_color else tagline)
     print()
 
 
@@ -93,11 +83,10 @@ STEPS = [
     ("Scanning", "Nmap - scan complet (ports + versions)", "nmap -sV -sC -p- {target}"),
     ("Scanning", "Masscan - scan rapide tous ports", "masscan -p1-65535 {target} --rate=1000"),
     # Legion = GUI qui automatise nmap + plein d'outils d'énumération
-    # tout seul (fork de Sparta). C'est une interface graphique, pas
-    # vraiment lançable en une ligne de commande comme les autres —
-    # tu le démarres pis tu rentres l'IP dedans directement :
+    # tout seul (fork de Sparta). C'est une interface graphique à part,
+    # pas lançable en une ligne de commande comme les autres — tu le
+    # démarres pis tu rentres l'IP dedans directement :
     #   legion
-
 
     # ---------------- ÉNUMÉRATION ----------------
     ("Énumération", "SMB enum", "enum4linux -a {target}"),
@@ -141,13 +130,13 @@ STEPS = [
 ]
 
 
-def run_step(module, name, cmd_template, target, url, report_lines):
+def run_step(module, name, cmd_template, target, url, report_lines, output=print):
     cmd = cmd_template.format(target=target, url=url)
 
-    print(f"\n{'=' * 60}")
-    print(f"[{module}] {name}")
-    print(f"Commande : {cmd}")
-    print(f"{'=' * 60}\n")
+    output(f"\n{'=' * 60}")
+    output(f"[{module}] {name}")
+    output(f"Commande : {cmd}")
+    output(f"{'=' * 60}\n")
 
     report_lines.append(f"\n## [{module}] {name}\n")
     report_lines.append(f"Commande : `{cmd}`\n")
@@ -160,51 +149,40 @@ def run_step(module, name, cmd_template, target, url, report_lines):
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=600
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        print(output)
-        report_lines.append(output.strip())
+        out_text = (result.stdout or "") + (result.stderr or "")
+        output(out_text)
+        report_lines.append(out_text.strip())
     except subprocess.TimeoutExpired:
         msg = "⚠️ Étape interrompue (timeout de 10 minutes dépassé)"
-        print(msg)
+        output(msg)
         report_lines.append(msg)
     except Exception as e:
         msg = f"⚠️ Erreur pendant cette étape : {e}"
-        print(msg)
+        output(msg)
         report_lines.append(msg)
 
     report_lines.append("```")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Tisseur — pipeline de pentest, Hacking 101")
-    parser.add_argument("--target", required=True, help="IP ou host de la cible")
-    parser.add_argument("--url", default=None, help="URL pour les outils web (défaut: http://<target>)")
-    parser.add_argument("--modules", default=None,
-                         help="Liste de modules séparés par virgule (défaut: tous). "
-                              "Ex: Reconnaissance,Scanning")
-    args = parser.parse_args()
-
-    print_banner()
-
-    target = args.target
-    url = args.url or f"http://{target}"
-    wanted_modules = [m.strip() for m in args.modules.split(",")] if args.modules else None
+def run_pipeline(target, url, modules_str, output=print):
+    url = url or f"http://{target}"
+    wanted_modules = [m.strip() for m in modules_str.split(",")] if modules_str else None
 
     steps_to_run = [s for s in STEPS if wanted_modules is None or s[0] in wanted_modules]
 
     if not steps_to_run:
-        print("Aucune étape ne correspond aux modules demandés.")
-        print("Modules disponibles :", sorted(set(s[0] for s in STEPS)))
-        sys.exit(1)
+        output("Aucune étape ne correspond aux modules demandés.")
+        output("Modules disponibles : " + ", ".join(sorted(set(s[0] for s in STEPS))))
+        return None
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     report_lines = [f"# Rapport Tisseur — Cible : {target}", f"Généré le {timestamp}\n"]
 
-    print(f"🧵 Tisseur démarré sur la cible {target}")
-    print(f"{len(steps_to_run)} étape(s) à exécuter, une par une.\n")
+    output(f"🧵 Tisseur démarré sur la cible {target}")
+    output(f"{len(steps_to_run)} étape(s) à exécuter, une par une.\n")
 
     for module, name, cmd_template in steps_to_run:
-        run_step(module, name, cmd_template, target, url, report_lines)
+        run_step(module, name, cmd_template, target, url, report_lines, output=output)
 
     filename = (
         f"tisseur_rapport_{target.replace('.', '_')}_"
@@ -213,9 +191,249 @@ def main():
     with open(filename, "w") as f:
         f.write("\n".join(report_lines))
 
-    print(f"\n{'=' * 60}")
-    print(f"✅ Tisseur terminé. Rapport sauvegardé : {filename}")
-    print(f"{'=' * 60}")
+    output(f"\n{'=' * 60}")
+    output(f"✅ Tisseur terminé. Rapport sauvegardé : {filename}")
+    output(f"{'=' * 60}")
+    return filename
+
+
+# ============================================================
+# GUIDE — texte brut, utilisé par le terminal ET la fenêtre GUI
+# ============================================================
+def get_guide_text():
+    modules_info = [
+        ("Reconnaissance", "ping, whois"),
+        ("Scanning", "nmap (scan complet), masscan (scan rapide)"),
+        ("Énumération", "enum4linux, gobuster, nikto, snmpwalk"),
+        ("Exploitation", "hydra (brute force SSH), sqlmap (injection SQL)"),
+        ("Outils avancés", "tcpdump (capture réseau)"),
+    ]
+    lines = []
+    lines.append("GUIDE — TISSEUR")
+    lines.append("=" * 56)
+    lines.append("")
+    lines.append("COMMANDE DE BASE (mode direct) :")
+    lines.append("  python3 tisseur.py --target <ip>")
+    lines.append("")
+    lines.append("MODULES :")
+    for nom, outils in modules_info:
+        lines.append(f"  {nom:<16} : {outils}")
+    lines.append("  Sans sélection, les 5 modules roulent au complet.")
+    lines.append("")
+    lines.append("URL POUR LES OUTILS WEB :")
+    lines.append("  Par défaut : http://<target>")
+    lines.append("  Précise-la si ton appli web est sur un autre port")
+    lines.append("  (ex: http://192.168.56.102:8080)")
+    lines.append("")
+    lines.append("ÉTAPES COMMENTÉES DANS LE CODE (désactivées par défaut) :")
+    lines.append("  theHarvester, Legion, Metasploit, Burp Suite, linPEAS,")
+    lines.append("  netcat, John the Ripper, Hashcat, Aircrack-ng, Wifite —")
+    lines.append("  elles ont besoin d'un setup différent d'une simple IP")
+    lines.append("  (hash, interface wifi, resource script...). Ouvre")
+    lines.append("  tisseur.py, section STEPS, pour l'explication de chacune")
+    lines.append("  et comment l'activer.")
+    lines.append("")
+    lines.append("⚠️  À utiliser seulement sur des machines que tu possèdes")
+    lines.append("    ou que t'as le droit explicite de tester.")
+    return "\n".join(lines)
+
+
+def show_guide_terminal():
+    use_color = sys.stdout.isatty()
+    for line in get_guide_text().split("\n"):
+        print(f"{ROUGE}{line}{RESET}" if (use_color and line.startswith("GUIDE")) else line)
+    print()
+
+
+# ============================================================
+# MENU INTERACTIF (terminal)
+# ============================================================
+def interactive_menu():
+    print_banner()
+    while True:
+        print("1) Lancer le pipeline complet")
+        print("2) Choisir des modules spécifiques")
+        print("3) Interface graphique")
+        print("4) Guide / Aide")
+        print("5) Quitter")
+        choix = input("\n> ").strip()
+
+        if choix == "1":
+            target = input("IP de la cible : ").strip()
+            if target:
+                run_pipeline(target, None, None)
+            break
+        elif choix == "2":
+            target = input("IP de la cible : ").strip()
+            mods = input("Modules (séparés par virgule, ex: Reconnaissance,Scanning) : ").strip()
+            if target:
+                run_pipeline(target, None, mods or None)
+            break
+        elif choix == "3":
+            launch_gui()
+            break
+        elif choix == "4":
+            show_guide_terminal()
+        elif choix == "5":
+            print("À la prochaine !")
+            break
+        else:
+            print("Choix invalide, réessaie.\n")
+
+
+# ============================================================
+# INTERFACE GRAPHIQUE (Tkinter — tourne sur ton appareil, pas
+# besoin du terminal une fois lancée)
+# ============================================================
+def launch_gui():
+    try:
+        import tkinter as tk
+        from tkinter import scrolledtext, messagebox
+    except ImportError:
+        print("Tkinter n'est pas installé.")
+        print("Sur Kali/Debian : sudo apt install python3-tk")
+        sys.exit(1)
+
+    class TisseurApp:
+        def __init__(self, root):
+            self.root = root
+            root.title("Tisseur")
+            root.configure(bg=NOIR_HEX)
+            root.geometry("820x660")
+
+            self.msg_queue = queue.Queue()
+
+            tk.Label(
+                root, text="TISSEUR", font=("Arial Black", 30, "bold"),
+                fg=ROUGE_HEX, bg=NOIR_HEX,
+            ).pack(pady=(14, 0))
+            tk.Label(
+                root, text="tisse tes commandes de pentest, une à la fois",
+                font=("Arial", 10, "italic"), fg=ROUGE_HEX, bg=NOIR_HEX,
+            ).pack(pady=(0, 10))
+
+            form = tk.Frame(root, bg=NOIR_HEX)
+            form.pack(fill="x", padx=16)
+
+            tk.Label(form, text="Cible (IP) :", fg="white", bg=NOIR_HEX).grid(row=0, column=0, sticky="w")
+            self.target_var = tk.StringVar()
+            tk.Entry(form, textvariable=self.target_var, width=28).grid(row=0, column=1, sticky="w", padx=8, pady=3)
+
+            tk.Label(form, text="URL (optionnel) :", fg="white", bg=NOIR_HEX).grid(row=1, column=0, sticky="w")
+            self.url_var = tk.StringVar()
+            tk.Entry(form, textvariable=self.url_var, width=28).grid(row=1, column=1, sticky="w", padx=8, pady=3)
+
+            mod_frame = tk.LabelFrame(root, text="Modules", fg="white", bg=NOIR_HEX, labelanchor="nw")
+            mod_frame.pack(fill="x", padx=16, pady=8)
+
+            self.module_vars = {}
+            all_modules = sorted(set(s[0] for s in STEPS))
+            for i, mod in enumerate(all_modules):
+                var = tk.BooleanVar(value=True)
+                tk.Checkbutton(
+                    mod_frame, text=mod, variable=var, fg="white", bg=NOIR_HEX,
+                    selectcolor="#1a1a1a", activebackground=NOIR_HEX, activeforeground="white",
+                ).grid(row=0, column=i, padx=6, pady=4, sticky="w")
+                self.module_vars[mod] = var
+
+            btn_frame = tk.Frame(root, bg=NOIR_HEX)
+            btn_frame.pack(fill="x", padx=16, pady=4)
+
+            self.launch_btn = tk.Button(
+                btn_frame, text="Lancer", command=self.launch,
+                bg=ROUGE_HEX, fg="white", font=("Arial", 11, "bold"), relief="flat", padx=12,
+            )
+            self.launch_btn.pack(side="left")
+
+            tk.Button(
+                btn_frame, text="Guide", command=self.show_guide,
+                bg="#1a1a1a", fg="white", relief="flat", padx=12,
+            ).pack(side="left", padx=8)
+
+            self.output = scrolledtext.ScrolledText(
+                root, bg=NOIR_HEX, fg="#e8e8e8", insertbackground="white", font=("Consolas", 10),
+            )
+            self.output.pack(fill="both", expand=True, padx=16, pady=(8, 16))
+
+            self.root.after(100, self.poll_queue)
+
+        def log(self, text):
+            self.msg_queue.put(text)
+
+        def poll_queue(self):
+            try:
+                while True:
+                    line = self.msg_queue.get_nowait()
+                    self.output.insert("end", str(line) + "\n")
+                    self.output.see("end")
+            except queue.Empty:
+                pass
+            self.root.after(100, self.poll_queue)
+
+        def show_guide(self):
+            win = tk.Toplevel(self.root)
+            win.title("Guide — Tisseur")
+            win.configure(bg=NOIR_HEX)
+            win.geometry("620x480")
+            txt = scrolledtext.ScrolledText(win, bg=NOIR_HEX, fg="white", font=("Consolas", 10))
+            txt.pack(fill="both", expand=True, padx=10, pady=10)
+            txt.insert("end", get_guide_text())
+            txt.config(state="disabled")
+
+        def launch(self):
+            target = self.target_var.get().strip()
+            if not target:
+                messagebox.showwarning("Tisseur", "Entre une IP de cible.")
+                return
+            url = self.url_var.get().strip() or None
+            selected = [m for m, v in self.module_vars.items() if v.get()]
+            if not selected:
+                messagebox.showwarning("Tisseur", "Sélectionne au moins un module.")
+                return
+            modules_str = ",".join(selected)
+
+            self.launch_btn.config(state="disabled")
+            self.output.delete("1.0", "end")
+
+            threading.Thread(target=self._run, args=(target, url, modules_str), daemon=True).start()
+
+        def _run(self, target, url, modules_str):
+            run_pipeline(target, url, modules_str, output=self.log)
+            self.root.after(0, lambda: self.launch_btn.config(state="normal"))
+
+    root = tk.Tk()
+    TisseurApp(root)
+    root.mainloop()
+
+
+def main():
+    # Pas d'arguments -> menu interactif dans le terminal (avec accès à la GUI dedans).
+    # --gui -> ouvre direct la fenêtre.
+    # --target ... -> mode direct, pour scripts/automatisation.
+    if len(sys.argv) == 1:
+        interactive_menu()
+        return
+
+    if "--gui" in sys.argv:
+        launch_gui()
+        return
+
+    parser = argparse.ArgumentParser(description="Tisseur — pipeline de pentest, Hacking 101")
+    parser.add_argument("--target", required=True, help="IP ou host de la cible")
+    parser.add_argument("--url", default=None, help="URL pour les outils web (défaut: http://<target>)")
+    parser.add_argument("--modules", default=None,
+                         help="Liste de modules séparés par virgule (défaut: tous). "
+                              "Ex: Reconnaissance,Scanning")
+    parser.add_argument("--guide", action="store_true", help="Affiche le guide puis quitte")
+    args = parser.parse_args()
+
+    print_banner()
+
+    if args.guide:
+        show_guide_terminal()
+        return
+
+    run_pipeline(args.target, args.url, args.modules)
 
 
 if __name__ == "__main__":

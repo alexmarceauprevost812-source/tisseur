@@ -104,3 +104,7 @@ font **une à la fois, en ordre**. Le moteur (`run_pipeline()`) accepte un
 « puits de sortie » (`output`) interchangeable, ce qui permet au terminal et à
 l'interface graphique de partager exactement le même code : la GUI roule le
 pipeline sur un thread en arrière-plan et affiche la sortie au fur et à mesure.
+
+---
+
+<p align="center"><em>Alex Marceau Prévost · Produit au Lac-Saint-Jean 🫐</em></p>

@@ -41,6 +41,8 @@ ROUGE = "\033[1;38;2;232;17;45m"   # #E8112D
 ROUGE_HEX = "#E8112D"
 NOIR_HEX = "#0a0a0a"
 
+SIGNATURE = "Alex Marceau Prévost · Produit au Lac-Saint-Jean 🫐"
+
 LOGO_TISSEUR = r"""
   ____________________ ________  ______
  /_  __/  _/ ___/ ___// ____/ / / / __ \
@@ -61,6 +63,9 @@ def print_banner():
     tagline = "— tisse tes commandes de pentest, une à la fois —"
     tagline = tagline.center(width)
     print(f"{ROUGE}{tagline}{RESET}" if use_color else tagline)
+
+    signature = SIGNATURE.center(width)
+    print(f"{ROUGE}{signature}{RESET}" if use_color else signature)
     print()
 
 
@@ -235,6 +240,8 @@ def get_guide_text():
     lines.append("")
     lines.append("⚠️  À utiliser seulement sur des machines que tu possèdes")
     lines.append("    ou que t'as le droit explicite de tester.")
+    lines.append("")
+    lines.append(SIGNATURE)
     return "\n".join(lines)
 
 
@@ -310,6 +317,10 @@ def launch_gui():
             tk.Label(
                 root, text="tisse tes commandes de pentest, une à la fois",
                 font=("Arial", 10, "italic"), fg=ROUGE_HEX, bg=NOIR_HEX,
+            ).pack(pady=(0, 0))
+            tk.Label(
+                root, text=SIGNATURE,
+                font=("Arial", 9), fg=ROUGE_HEX, bg=NOIR_HEX,
             ).pack(pady=(0, 10))
 
             form = tk.Frame(root, bg=NOIR_HEX)
@@ -418,6 +429,11 @@ def main():
         launch_gui()
         return
 
+    if "--guide" in sys.argv:
+        print_banner()
+        show_guide_terminal()
+        return
+
     parser = argparse.ArgumentParser(description="Tisseur — pipeline de pentest, Hacking 101")
     parser.add_argument("--target", required=True, help="IP ou host de la cible")
     parser.add_argument("--url", default=None, help="URL pour les outils web (défaut: http://<target>)")
@@ -428,10 +444,6 @@ def main():
     args = parser.parse_args()
 
     print_banner()
-
-    if args.guide:
-        show_guide_terminal()
-        return
 
     run_pipeline(args.target, args.url, args.modules)
 

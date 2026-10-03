@@ -328,11 +328,15 @@ def launch_gui():
 
             tk.Label(form, text="Cible (IP) :", fg="white", bg=NOIR_HEX).grid(row=0, column=0, sticky="w")
             self.target_var = tk.StringVar()
-            tk.Entry(form, textvariable=self.target_var, width=28).grid(row=0, column=1, sticky="w", padx=8, pady=3)
+            target_entry = tk.Entry(form, textvariable=self.target_var, width=28)
+            target_entry.grid(row=0, column=1, sticky="w", padx=8, pady=3)
+            self._add_context_menu(target_entry)
 
             tk.Label(form, text="URL (optionnel) :", fg="white", bg=NOIR_HEX).grid(row=1, column=0, sticky="w")
             self.url_var = tk.StringVar()
-            tk.Entry(form, textvariable=self.url_var, width=28).grid(row=1, column=1, sticky="w", padx=8, pady=3)
+            url_entry = tk.Entry(form, textvariable=self.url_var, width=28)
+            url_entry.grid(row=1, column=1, sticky="w", padx=8, pady=3)
+            self._add_context_menu(url_entry)
 
             mod_frame = tk.LabelFrame(root, text="Modules", fg="white", bg=NOIR_HEX, labelanchor="nw")
             mod_frame.pack(fill="x", padx=16, pady=8)
@@ -361,12 +365,55 @@ def launch_gui():
                 bg="#1a1a1a", fg="white", relief="flat", padx=12,
             ).pack(side="left", padx=8)
 
+            tk.Button(
+                btn_frame, text="Copier le rapport", command=self.copy_output,
+                bg="#1a1a1a", fg="white", relief="flat", padx=12,
+            ).pack(side="left")
+
             self.output = scrolledtext.ScrolledText(
                 root, bg=NOIR_HEX, fg="#e8e8e8", insertbackground="white", font=("Consolas", 10),
             )
             self.output.pack(fill="both", expand=True, padx=16, pady=(8, 16))
+            self._add_context_menu(self.output)
 
             self.root.after(100, self.poll_queue)
+
+        def _add_context_menu(self, widget):
+            # Menu clic-droit + raccourcis clavier fiables (indépendants du
+            # layout du clavier, contrairement aux bindings Ctrl par défaut).
+            import tkinter as tk
+            menu = tk.Menu(widget, tearoff=0)
+            menu.add_command(label="Couper", command=lambda: widget.event_generate("<<Cut>>"))
+            menu.add_command(label="Copier", command=lambda: widget.event_generate("<<Copy>>"))
+            menu.add_command(label="Coller", command=lambda: widget.event_generate("<<Paste>>"))
+            menu.add_separator()
+            menu.add_command(label="Tout sélectionner",
+                             command=lambda: self._select_all(widget))
+
+            def popup(event):
+                widget.focus_set()
+                menu.tk_popup(event.x_root, event.y_root)
+
+            widget.bind("<Button-3>", popup)   # clic droit (Windows/Linux)
+            widget.bind("<Button-2>", popup)   # clic droit (macOS)
+            widget.bind("<Control-a>", lambda e: (self._select_all(widget), "break")[1])
+            widget.bind("<Control-A>", lambda e: (self._select_all(widget), "break")[1])
+
+        @staticmethod
+        def _select_all(widget):
+            try:
+                if isinstance(widget, scrolledtext.ScrolledText):
+                    widget.tag_add("sel", "1.0", "end-1c")
+                else:
+                    widget.select_range(0, "end")
+                    widget.icursor("end")
+            except Exception:
+                pass
+
+        def copy_output(self):
+            text = self.output.get("1.0", "end-1c")
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
 
         def log(self, text):
             self.msg_queue.put(text)

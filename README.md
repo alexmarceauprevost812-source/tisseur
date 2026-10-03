@@ -101,6 +101,17 @@ python3 tisseur.py --guide
 | `--gui` | Ouvre directement l'interface graphique |
 | `--guide` | Affiche le guide puis quitte |
 
+### Copier-coller dans l'interface graphique
+
+Les champs **Cible / URL** et la zone de résultats supportent le copier-coller :
+
+- **Clic droit** n'importe où → menu **Couper / Copier / Coller / Tout
+  sélectionner**.
+- **Ctrl+A** pour tout sélectionner (fiable même en clavier français, là où les
+  raccourcis Ctrl par défaut de Tkinter sont capricieux).
+- Le bouton **« Copier le rapport »** copie toute la sortie affichée dans le
+  presse-papier d'un seul coup.
+
 ---
 
 ## Le rapport

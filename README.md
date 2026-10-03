@@ -32,6 +32,41 @@ l'activer.
 
 ---
 
+## Installation
+
+### 1. Télécharger l'outil
+
+```bash
+git clone https://github.com/alexmarceauprevost812-source/tisseur.git
+cd tisseur
+git checkout claude/nice-goldberg-saufsc
+```
+
+> ⚠️ Le `git checkout` est important : le code vit sur la branche
+> `claude/nice-goldberg-saufsc`. Sans cette ligne, tu te retrouves sur une
+> branche sans le script.
+
+Pour mettre à jour un dossier déjà cloné :
+
+```bash
+cd tisseur
+git pull origin claude/nice-goldberg-saufsc
+```
+
+### 2. Dépendances
+
+- **Python 3** — déjà présent sur Kali/Linux ; aucun paquet externe pour les
+  modes terminal.
+- **Tkinter** — seulement pour l'interface graphique (`--gui`). Sur Kali/Debian :
+  ```bash
+  sudo apt install python3-tk
+  ```
+- **Les outils de pentest** (`nmap`, `masscan`, `hydra`, `nikto`, `enum4linux`,
+  `gobuster`, `sqlmap`, `snmpwalk`, `tcpdump`…) — préinstallés sur **Kali
+  Linux**. Tisseur ne fait que les lancer, il ne les installe pas.
+
+---
+
 ## Trois façons de le lancer
 
 ```bash

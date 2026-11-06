@@ -1,0 +1,13 @@
+# Cache et bytecode Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Rapports générés par Tisseur
+tisseur_rapport_*.md
+
+# Captures réseau générées par le module tcpdump
+*.pcap
+
+# Fichiers système
+.DS_Store

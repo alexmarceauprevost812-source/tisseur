@@ -17,7 +17,14 @@ EXEMPLES (mode direct) :
     python3 tisseur.py --target 192.168.56.102
     python3 tisseur.py --target 192.168.56.102 --modules Reconnaissance,Scanning
     python3 tisseur.py --target 192.168.56.102 --url http://192.168.56.102:8080
+    python3 tisseur.py --target 192.168.56.102 --ia          # + analyse IA locale
     python3 tisseur.py --guide
+
+ANALYSE IA (optionnelle) : avec --ia, une IA LOCALE (Ollama ou llama.cpp,
+sur ta propre machine, rien n'est envoyé sur Internet) lit le rapport et te
+conseille les prochaines étapes. Elle n'exécute jamais de commande elle-même.
+    Ollama    : https://ollama.com  ->  ollama run llama3
+    llama.cpp : ./llama-server -m modele.gguf   (port 8080)
 
 L'interface graphique a besoin de Tkinter. Sur Kali, si c'est pas
 déjà installé : sudo apt install python3-tk
@@ -32,6 +39,9 @@ import sys
 import datetime
 import threading
 import queue
+import json
+import urllib.request
+import urllib.error
 
 # ============================================================
 # BANNIÈRE ASCII (terminal) — figlet "slant", même rouge que le logo
@@ -217,7 +227,7 @@ def run_step(module, name, cmd_template, target, url, report_lines, output=print
     report_lines.append("```")
 
 
-def run_pipeline(target, url, modules_str, output=print):
+def run_pipeline(target, url, modules_str, output=print, ia=None):
     url = url or f"http://{target}"
     wanted_modules = [m.strip() for m in modules_str.split(",")] if modules_str else None
 
@@ -248,7 +258,117 @@ def run_pipeline(target, url, modules_str, output=print):
     output(colore("=" * 60, BORDURE_HEX, tty))
     output(colore(f"✅ Tisseur terminé. Rapport sauvegardé : {filename}", C_OK, tty))
     output(colore("=" * 60, BORDURE_HEX, tty))
+
+    # Analyse IA optionnelle : on relit le rapport et on demande à une IA
+    # LOCALE de le résumer et de conseiller les prochaines étapes.
+    if ia:
+        analyse = analyse_ia("\n".join(report_lines), ia, output=output)
+        if analyse:
+            with open(filename, "a") as f:
+                f.write("\n\n---\n\n## 🤖 Analyse IA\n\n")
+                f.write(analyse.strip() + "\n")
+
     return filename
+
+
+# ============================================================
+# ANALYSE IA LOCALE (Ollama ou llama.cpp)
+# ------------------------------------------------------------
+# L'IA tourne EN LOCAL sur ta machine (aucune donnée envoyée sur
+# Internet). Elle LIT le rapport et te CONSEILLE — elle n'exécute
+# jamais de commande elle-même.
+#
+#   Ollama     : https://ollama.com  ->  ollama run llama3
+#                API : http://localhost:11434
+#   llama.cpp  : serveur ./llama-server -m modele.gguf
+#                API : http://localhost:8080
+# ============================================================
+IA_DEFAUTS = {
+    "ollama":   {"url": "http://localhost:11434", "modele": "llama3"},
+    "llamacpp": {"url": "http://localhost:8080",  "modele": ""},
+}
+
+PROMPT_IA = """Tu es un mentor en cybersécurité pour le cours « Hacking 101 ».
+On te donne le rapport d'un scan de pentest effectué sur un LAB D'ENTRAÎNEMENT
+AUTORISÉ (une machine Metasploitable2 ou équivalente que l'étudiant possède et a
+le droit de tester).
+
+Analyse ce rapport et réponds EN FRANÇAIS, de façon claire et pédagogique :
+
+1. RÉSUMÉ — les hôtes, ports ouverts, services et versions détectés.
+2. FAILLES POTENTIELLES — les vulnérabilités probables, de la plus à la moins
+   prioritaire, avec une courte explication de chacune.
+3. PROCHAINES ÉTAPES — quoi explorer ensuite pour apprendre, en restant dans le
+   cadre d'un lab autorisé.
+
+Reste factuel : base-toi sur ce qui est RÉELLEMENT dans le rapport. Ne donne pas
+d'instructions pour attaquer des systèmes non autorisés.
+
+===== RAPPORT =====
+{rapport}
+===== FIN DU RAPPORT =====
+"""
+
+
+def analyse_ia(rapport, ia, output=print):
+    """Envoie le rapport à une IA locale et renvoie son analyse (texte).
+
+    `ia` est un dict : {"moteur": "ollama"|"llamacpp", "modele": str, "url": str}.
+    Renvoie None en cas d'échec (après avoir affiché une explication).
+    """
+    moteur = ia.get("moteur", "ollama")
+    defauts = IA_DEFAUTS.get(moteur, IA_DEFAUTS["ollama"])
+    url = (ia.get("url") or defauts["url"]).rstrip("/")
+    modele = ia.get("modele") or defauts["modele"]
+
+    tty = (output is print) and sys.stdout.isatty()
+    output("")
+    output(colore(f"🤖 Analyse IA locale ({moteur}) en cours…", C_GAMER, tty))
+
+    # On tronque le rapport pour ne pas dépasser le contexte du modèle.
+    rapport_court = rapport[:12000]
+    prompt = PROMPT_IA.format(rapport=rapport_court)
+
+    try:
+        if moteur == "ollama":
+            endpoint = f"{url}/api/generate"
+            payload = {"model": modele, "prompt": prompt, "stream": False}
+        else:  # llamacpp
+            endpoint = f"{url}/completion"
+            payload = {"prompt": prompt, "n_predict": 768, "stream": False}
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint, data=data, headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        # Ollama -> "response" ; llama.cpp -> "content"
+        texte = (body.get("response") or body.get("content") or "").strip()
+        if not texte:
+            output(colore("⚠️ L'IA a répondu, mais sans texte exploitable.", C_DEL, tty))
+            return None
+
+        output(colore("=" * 60, BORDURE_HEX, tty))
+        output(colore("🤖 ANALYSE IA", C_GAMER, tty))
+        output(colore("=" * 60, BORDURE_HEX, tty))
+        output(texte)
+        return texte
+
+    except urllib.error.URLError as e:
+        output(colore(f"⚠️ Impossible de joindre l'IA locale ({moteur}) : {e.reason}", C_DEL, tty))
+        if moteur == "ollama":
+            output("   Démarre Ollama d'abord :  ollama run " + (modele or "llama3"))
+            output("   (installe-le sur https://ollama.com si ce n'est pas fait)")
+        else:
+            output("   Démarre le serveur llama.cpp d'abord :")
+            output("   ./llama-server -m ton_modele.gguf  (écoute sur le port 8080)")
+        return None
+    except Exception as e:
+        output(colore(f"⚠️ Erreur pendant l'analyse IA : {e}", C_DEL, tty))
+        return None
+
 
 
 # ============================================================
@@ -309,6 +429,19 @@ def show_guide_terminal():
 # ============================================================
 # MENU INTERACTIF (terminal)
 # ============================================================
+def _demander_ia():
+    """Demande (terminal) si on veut une analyse IA, et avec quel moteur."""
+    rep = input("Analyse IA locale à la fin ? (o/N) : ").strip().lower()
+    if rep not in ("o", "oui", "y", "yes"):
+        return None
+    moteur = input("Moteur — 1) Ollama (défaut)  2) llama.cpp : ").strip()
+    moteur = "llamacpp" if moteur == "2" else "ollama"
+    modele = None
+    if moteur == "ollama":
+        modele = input("Modèle Ollama (défaut: llama3) : ").strip() or None
+    return {"moteur": moteur, "modele": modele, "url": None}
+
+
 def interactive_menu():
     print_banner()
     while True:
@@ -322,13 +455,15 @@ def interactive_menu():
         if choix == "1":
             target = input("IP de la cible : ").strip()
             if target:
-                run_pipeline(target, None, None)
+                ia = _demander_ia()
+                run_pipeline(target, None, None, ia=ia)
             break
         elif choix == "2":
             target = input("IP de la cible : ").strip()
             mods = input("Modules (séparés par virgule, ex: Reconnaissance,Scanning) : ").strip()
             if target:
-                run_pipeline(target, None, mods or None)
+                ia = _demander_ia()
+                run_pipeline(target, None, mods or None, ia=ia)
             break
         elif choix == "3":
             launch_gui()
@@ -409,6 +544,25 @@ def launch_gui():
                     selectcolor="#161616", activebackground=NOIR_HEX, activeforeground=coul,
                 ).grid(row=0, column=i, padx=6, pady=4, sticky="w")
                 self.module_vars[mod] = var
+
+            # --- Panneau IA locale ---
+            ia_frame = tk.LabelFrame(root, text="IA locale (analyse)", fg=C_GAMER, bg=NOIR_HEX, labelanchor="nw")
+            ia_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+            self.ia_var = tk.BooleanVar(value=False)
+            tk.Checkbutton(
+                ia_frame, text="Analyser le rapport avec une IA locale à la fin",
+                variable=self.ia_var, fg=C_GAMER, bg=NOIR_HEX,
+                selectcolor="#161616", activebackground=NOIR_HEX, activeforeground=C_GAMER,
+            ).grid(row=0, column=0, columnspan=4, padx=6, pady=(4, 0), sticky="w")
+
+            tk.Label(ia_frame, text="Moteur :", fg=TEXTE_HEX, bg=NOIR_HEX).grid(row=1, column=0, padx=6, pady=4, sticky="w")
+            self.ia_moteur_var = tk.StringVar(value="ollama")
+            tk.OptionMenu(ia_frame, self.ia_moteur_var, "ollama", "llamacpp").grid(row=1, column=1, padx=4, pady=4, sticky="w")
+
+            tk.Label(ia_frame, text="Modèle :", fg=TEXTE_HEX, bg=NOIR_HEX).grid(row=1, column=2, padx=6, pady=4, sticky="w")
+            self.ia_modele_var = tk.StringVar(value="llama3")
+            tk.Entry(ia_frame, textvariable=self.ia_modele_var, width=16, **entry_style).grid(row=1, column=3, padx=4, pady=4, sticky="w")
 
             btn_frame = tk.Frame(root, bg=NOIR_HEX)
             btn_frame.pack(fill="x", padx=16, pady=4)
@@ -512,13 +666,21 @@ def launch_gui():
                 return
             modules_str = ",".join(selected)
 
+            ia = None
+            if self.ia_var.get():
+                ia = {
+                    "moteur": self.ia_moteur_var.get(),
+                    "modele": self.ia_modele_var.get().strip() or None,
+                    "url": None,
+                }
+
             self.launch_btn.config(state="disabled")
             self.output.delete("1.0", "end")
 
-            threading.Thread(target=self._run, args=(target, url, modules_str), daemon=True).start()
+            threading.Thread(target=self._run, args=(target, url, modules_str, ia), daemon=True).start()
 
-        def _run(self, target, url, modules_str):
-            run_pipeline(target, url, modules_str, output=self.log)
+        def _run(self, target, url, modules_str, ia=None):
+            run_pipeline(target, url, modules_str, output=self.log, ia=ia)
             self.root.after(0, lambda: self.launch_btn.config(state="normal"))
 
     root = tk.Tk()
@@ -550,11 +712,24 @@ def main():
                          help="Liste de modules séparés par virgule (défaut: tous). "
                               "Ex: Reconnaissance,Scanning")
     parser.add_argument("--guide", action="store_true", help="Affiche le guide puis quitte")
+    parser.add_argument("--ia", action="store_true",
+                         help="Analyse le rapport avec une IA LOCALE à la fin (conseils)")
+    parser.add_argument("--ia-moteur", default="ollama", choices=["ollama", "llamacpp"],
+                         help="Moteur d'IA locale (défaut: ollama)")
+    parser.add_argument("--ia-modele", default=None,
+                         help="Nom du modèle (ollama: défaut 'llama3')")
+    parser.add_argument("--ia-url", default=None,
+                         help="URL de l'API IA (défaut: ollama http://localhost:11434, "
+                              "llamacpp http://localhost:8080)")
     args = parser.parse_args()
 
     print_banner()
 
-    run_pipeline(args.target, args.url, args.modules)
+    ia = None
+    if args.ia:
+        ia = {"moteur": args.ia_moteur, "modele": args.ia_modele, "url": args.ia_url}
+
+    run_pipeline(args.target, args.url, args.modules, ia=ia)
 
 
 if __name__ == "__main__":

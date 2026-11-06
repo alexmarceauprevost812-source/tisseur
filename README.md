@@ -157,6 +157,45 @@ interrompue (timeout) et notée comme telle dans le rapport.
 
 ---
 
+## Analyse IA locale (optionnel)
+
+Avec l'option **`--ia`**, Tisseur fait lire le rapport à une **IA qui tourne sur
+ta propre machine** (rien n'est envoyé sur Internet). Elle **résume les failles
+trouvées et conseille les prochaines étapes** — elle n'exécute **jamais** de
+commande elle-même. L'analyse s'affiche à l'écran et s'ajoute au bas du rapport
+`.md`.
+
+Deux moteurs supportés (aucune dépendance Python à installer, juste le moteur) :
+
+| Moteur | Démarrer | Port API |
+|---|---|---|
+| **Ollama** | `ollama run llama3` ([ollama.com](https://ollama.com)) | `11434` |
+| **llama.cpp** | `./llama-server -m modele.gguf` | `8080` |
+
+### Exemples
+
+```bash
+# Pipeline + analyse par Ollama (modèle llama3 par défaut)
+tisseur --target 192.168.56.102 --ia
+
+# Choisir le modèle Ollama
+tisseur --target 192.168.56.102 --ia --ia-modele mistral
+
+# Utiliser llama.cpp au lieu d'Ollama
+tisseur --target 192.168.56.102 --ia --ia-moteur llamacpp
+```
+
+Options IA : `--ia` (active), `--ia-moteur ollama|llamacpp`, `--ia-modele <nom>`,
+`--ia-url <url>` (si ton moteur n'est pas sur le port par défaut).
+
+Dans le **menu interactif** et l'**interface graphique**, une case « IA locale »
+te laisse activer l'analyse et choisir le moteur/modèle sans taper d'options.
+
+> 💡 Si l'IA n'est pas démarrée, Tisseur te le dit poliment et te donne la
+> commande pour la lancer — le pipeline, lui, a déjà fait son travail.
+
+---
+
 ## Prérequis
 
 - **Python 3** (aucune dépendance externe pour les modes terminal).

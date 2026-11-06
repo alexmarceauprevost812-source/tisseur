@@ -297,4 +297,29 @@ pipeline sur un thread en arrière-plan et affiche la sortie au fur et à mesure
 
 ---
 
+## Structure du code
+
+Le code est découpé en **modules** (une pièce par fichier) dans le dossier
+`tisseurkit/`. Tu n'as rien à monter : `tisseur.py` est juste le point d'entrée,
+et Python assemble les pièces tout seul au lancement.
+
+| Fichier | Rôle |
+|---|---|
+| `tisseur.py` | Point d'entrée (la « clé de contact ») |
+| `tisseurkit/theme.py` | Couleurs, palette néon, bannière |
+| `tisseurkit/etapes.py` | La liste des étapes (`STEPS`) |
+| `tisseurkit/pipeline.py` | Le moteur : exécute les étapes, écrit le rapport |
+| `tisseurkit/ia.py` | Analyse IA + chat `/chat` (Ollama / llama.cpp) |
+| `tisseurkit/outils.py` | Vérif des outils, autorisation, notifications |
+| `tisseurkit/rapport.py` | Rapport HTML |
+| `tisseurkit/guide.py` | Guide / aide |
+| `tisseurkit/menu.py` | Menu interactif (terminal) |
+| `tisseurkit/gui.py` | Interface graphique (Tkinter) |
+| `tisseurkit/cli.py` | Options en ligne de commande (`--target`, `--ia`…) |
+
+> Ça ne change **rien** à l'installation ni au lancement : toujours
+> `python3 tisseur.py` ou la commande `tisseur`.
+
+---
+
 <p align="center"><em>Alex Marceau Prévost · Produit au Lac-Saint-Jean 🫐</em></p>

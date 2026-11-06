@@ -37,9 +37,54 @@ import queue
 # BANNIÈRE ASCII (terminal) — figlet "slant", même rouge que le logo
 # ============================================================
 RESET = "\033[0m"
-ROUGE = "\033[1;38;2;232;17;45m"   # #E8112D
-ROUGE_HEX = "#E8112D"
-NOIR_HEX = "#0a0a0a"
+ROUGE = "\033[1;38;2;232;17;45m"   # #E8112D (gardé pour compat)
+
+# ============================================================
+# PALETTE LEXOS-PRO (terminal ami) — thème néon sur fond noir
+# ============================================================
+NOIR_HEX = "#0A0A0A"          # fond principal
+NOIR_SIDE_HEX = "#070707"     # fond panneau latéral
+TEXTE_HEX = "#EDEDED"         # texte principal
+TEXTE2_HEX = "#D4D4D4"        # texte champs
+MUTED_HEX = "#A3A3A3"         # texte secondaire
+BORDURE_HEX = "#222222"       # bordures
+ACCENT_HEX = "#4D8DFF"        # accent principal (réseau/bleu)
+
+# Couleurs par usage (hex) — reprises du mockup Terminal LEXOS-PRO
+C_NET = "#4D8DFF"   # réseau / accent
+C_OK = "#39FF88"    # succès
+C_ERR = "#FF4D6D"   # erreur
+C_DEL = "#FF9F1C"   # suppression / alerte
+C_HELP = "#FFD23F"  # aide / guide
+C_DL = "#B46BFF"    # téléchargement
+C_SCAN = "#22D3EE"  # scan
+C_GAMER = "#FF2BD6" # accent rose
+
+# Couleur néon attribuée à chaque module
+MODULE_COULEURS = {
+    "Reconnaissance": C_SCAN,
+    "Scanning": C_NET,
+    "Énumération": C_HELP,
+    "Exploitation": C_ERR,
+    "Outils avancés": C_DL,
+}
+
+
+def _ansi(hex_color):
+    """Transforme un #RRGGBB en séquence ANSI truecolor (texte, gras)."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"\033[1;38;2;{r};{g};{b}m"
+
+
+def colore(texte, hex_color, actif=True):
+    """Entoure le texte de couleur ANSI si le terminal le supporte."""
+    return f"{_ansi(hex_color)}{texte}{RESET}" if actif else texte
+
+
+# Accent principal du terminal, en ANSI (remplace l'ancien rouge au démarrage)
+ACCENT = _ansi(ACCENT_HEX)
+ROUGE_HEX = ACCENT_HEX  # alias conservé pour le reste du code GUI
 
 SIGNATURE = "Alex Marceau Prévost · Produit au Lac-Saint-Jean 🫐"
 
@@ -58,14 +103,14 @@ def print_banner():
     width = max(len(l) for l in lines)
 
     for line in lines:
-        print(f"{ROUGE}{line}{RESET}" if use_color else line)
+        print(colore(line, ACCENT_HEX, use_color))
 
     tagline = "— tisse tes commandes de pentest, une à la fois —"
     tagline = tagline.center(width)
-    print(f"{ROUGE}{tagline}{RESET}" if use_color else tagline)
+    print(colore(tagline, C_SCAN, use_color))
 
     signature = SIGNATURE.center(width)
-    print(f"{ROUGE}{signature}{RESET}" if use_color else signature)
+    print(colore(signature, MUTED_HEX, use_color))
     print()
 
 
@@ -137,11 +182,14 @@ STEPS = [
 
 def run_step(module, name, cmd_template, target, url, report_lines, output=print):
     cmd = cmd_template.format(target=target, url=url)
+    coul = MODULE_COULEURS.get(module, ACCENT_HEX)
+    # On ne colore (ANSI) que la sortie terminal ; la fenêtre reçoit du texte brut.
+    use_color = (output is print) and sys.stdout.isatty()
 
-    output(f"\n{'=' * 60}")
-    output(f"[{module}] {name}")
-    output(f"Commande : {cmd}")
-    output(f"{'=' * 60}\n")
+    output(colore("=" * 60, BORDURE_HEX, use_color))
+    output(colore(f"[{module}] {name}", coul, use_color))
+    output(colore(f"Commande : {cmd}", MUTED_HEX, use_color))
+    output(colore("=" * 60, BORDURE_HEX, use_color) + "\n")
 
     report_lines.append(f"\n## [{module}] {name}\n")
     report_lines.append(f"Commande : `{cmd}`\n")
@@ -183,8 +231,9 @@ def run_pipeline(target, url, modules_str, output=print):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     report_lines = [f"# Rapport Tisseur — Cible : {target}", f"Généré le {timestamp}\n"]
 
-    output(f"🧵 Tisseur démarré sur la cible {target}")
-    output(f"{len(steps_to_run)} étape(s) à exécuter, une par une.\n")
+    tty = (output is print) and sys.stdout.isatty()
+    output(colore(f"🧵 Tisseur démarré sur la cible {target}", C_NET, tty))
+    output(colore(f"{len(steps_to_run)} étape(s) à exécuter, une par une.", MUTED_HEX, tty) + "\n")
 
     for module, name, cmd_template in steps_to_run:
         run_step(module, name, cmd_template, target, url, report_lines, output=output)
@@ -196,9 +245,9 @@ def run_pipeline(target, url, modules_str, output=print):
     with open(filename, "w") as f:
         f.write("\n".join(report_lines))
 
-    output(f"\n{'=' * 60}")
-    output(f"✅ Tisseur terminé. Rapport sauvegardé : {filename}")
-    output(f"{'=' * 60}")
+    output(colore("=" * 60, BORDURE_HEX, tty))
+    output(colore(f"✅ Tisseur terminé. Rapport sauvegardé : {filename}", C_OK, tty))
+    output(colore("=" * 60, BORDURE_HEX, tty))
     return filename
 
 
@@ -248,7 +297,12 @@ def get_guide_text():
 def show_guide_terminal():
     use_color = sys.stdout.isatty()
     for line in get_guide_text().split("\n"):
-        print(f"{ROUGE}{line}{RESET}" if (use_color and line.startswith("GUIDE")) else line)
+        if use_color and (line.startswith("GUIDE") or line.startswith("=")):
+            print(colore(line, C_HELP))
+        elif use_color and line.strip().startswith("⚠"):
+            print(colore(line, C_DEL))
+        else:
+            print(line)
     print()
 
 
@@ -312,42 +366,47 @@ def launch_gui():
 
             tk.Label(
                 root, text="TISSEUR", font=("Arial Black", 30, "bold"),
-                fg=ROUGE_HEX, bg=NOIR_HEX,
+                fg=ACCENT_HEX, bg=NOIR_HEX,
             ).pack(pady=(14, 0))
             tk.Label(
                 root, text="tisse tes commandes de pentest, une à la fois",
-                font=("Arial", 10, "italic"), fg=ROUGE_HEX, bg=NOIR_HEX,
+                font=("Arial", 10, "italic"), fg=C_SCAN, bg=NOIR_HEX,
             ).pack(pady=(0, 0))
             tk.Label(
                 root, text=SIGNATURE,
-                font=("Arial", 9), fg=ROUGE_HEX, bg=NOIR_HEX,
+                font=("Arial", 9), fg=MUTED_HEX, bg=NOIR_HEX,
             ).pack(pady=(0, 10))
 
             form = tk.Frame(root, bg=NOIR_HEX)
             form.pack(fill="x", padx=16)
 
-            tk.Label(form, text="Cible (IP) :", fg="white", bg=NOIR_HEX).grid(row=0, column=0, sticky="w")
+            entry_style = dict(bg="#161616", fg=TEXTE_HEX, insertbackground=ACCENT_HEX,
+                               relief="flat", highlightthickness=1,
+                               highlightbackground=BORDURE_HEX, highlightcolor=ACCENT_HEX)
+
+            tk.Label(form, text="Cible (IP) :", fg=TEXTE_HEX, bg=NOIR_HEX).grid(row=0, column=0, sticky="w")
             self.target_var = tk.StringVar()
-            target_entry = tk.Entry(form, textvariable=self.target_var, width=28)
+            target_entry = tk.Entry(form, textvariable=self.target_var, width=28, **entry_style)
             target_entry.grid(row=0, column=1, sticky="w", padx=8, pady=3)
             self._add_context_menu(target_entry)
 
-            tk.Label(form, text="URL (optionnel) :", fg="white", bg=NOIR_HEX).grid(row=1, column=0, sticky="w")
+            tk.Label(form, text="URL (optionnel) :", fg=TEXTE_HEX, bg=NOIR_HEX).grid(row=1, column=0, sticky="w")
             self.url_var = tk.StringVar()
-            url_entry = tk.Entry(form, textvariable=self.url_var, width=28)
+            url_entry = tk.Entry(form, textvariable=self.url_var, width=28, **entry_style)
             url_entry.grid(row=1, column=1, sticky="w", padx=8, pady=3)
             self._add_context_menu(url_entry)
 
-            mod_frame = tk.LabelFrame(root, text="Modules", fg="white", bg=NOIR_HEX, labelanchor="nw")
+            mod_frame = tk.LabelFrame(root, text="Modules", fg=C_SCAN, bg=NOIR_HEX, labelanchor="nw")
             mod_frame.pack(fill="x", padx=16, pady=8)
 
             self.module_vars = {}
             all_modules = sorted(set(s[0] for s in STEPS))
             for i, mod in enumerate(all_modules):
                 var = tk.BooleanVar(value=True)
+                coul = MODULE_COULEURS.get(mod, TEXTE_HEX)
                 tk.Checkbutton(
-                    mod_frame, text=mod, variable=var, fg="white", bg=NOIR_HEX,
-                    selectcolor="#1a1a1a", activebackground=NOIR_HEX, activeforeground="white",
+                    mod_frame, text=mod, variable=var, fg=coul, bg=NOIR_HEX,
+                    selectcolor="#161616", activebackground=NOIR_HEX, activeforeground=coul,
                 ).grid(row=0, column=i, padx=6, pady=4, sticky="w")
                 self.module_vars[mod] = var
 
@@ -356,22 +415,25 @@ def launch_gui():
 
             self.launch_btn = tk.Button(
                 btn_frame, text="Lancer", command=self.launch,
-                bg=ROUGE_HEX, fg="white", font=("Arial", 11, "bold"), relief="flat", padx=12,
+                bg=C_NET, fg="#0A0A0A", activebackground=C_SCAN, activeforeground="#0A0A0A",
+                font=("Arial", 11, "bold"), relief="flat", padx=12,
             )
             self.launch_btn.pack(side="left")
 
             tk.Button(
                 btn_frame, text="Guide", command=self.show_guide,
-                bg="#1a1a1a", fg="white", relief="flat", padx=12,
+                bg="#161616", fg=C_HELP, activebackground="#1E1E1E", activeforeground=C_HELP,
+                relief="flat", padx=12,
             ).pack(side="left", padx=8)
 
             tk.Button(
                 btn_frame, text="Copier le rapport", command=self.copy_output,
-                bg="#1a1a1a", fg="white", relief="flat", padx=12,
+                bg="#161616", fg=C_DL, activebackground="#1E1E1E", activeforeground=C_DL,
+                relief="flat", padx=12,
             ).pack(side="left")
 
             self.output = scrolledtext.ScrolledText(
-                root, bg=NOIR_HEX, fg="#e8e8e8", insertbackground="white", font=("Consolas", 10),
+                root, bg="#070707", fg=TEXTE_HEX, insertbackground=ACCENT_HEX, font=("Consolas", 10),
             )
             self.output.pack(fill="both", expand=True, padx=16, pady=(8, 16))
             self._add_context_menu(self.output)
@@ -433,7 +495,7 @@ def launch_gui():
             win.title("Guide — Tisseur")
             win.configure(bg=NOIR_HEX)
             win.geometry("620x480")
-            txt = scrolledtext.ScrolledText(win, bg=NOIR_HEX, fg="white", font=("Consolas", 10))
+            txt = scrolledtext.ScrolledText(win, bg="#070707", fg=TEXTE_HEX, font=("Consolas", 10))
             txt.pack(fill="both", expand=True, padx=10, pady=10)
             txt.insert("end", get_guide_text())
             txt.config(state="disabled")

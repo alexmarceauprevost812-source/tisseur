@@ -127,8 +127,29 @@ python3 tisseur.py --guide
 | `--target <ip>` | IP ou host de la cible (**requis** en mode direct) |
 | `--url <url>` | URL pour les outils web (défaut : `http://<target>`) |
 | `--modules <liste>` | Modules séparés par virgule (défaut : tous). Ex : `Reconnaissance,Scanning` |
+| `--mission "<texte>"` | Rapport de mission / objectif, pour **diriger l'IA** |
+| `--html` | Génère aussi un **rapport HTML** stylé en plus du `.md` |
+| `--check` | Vérifie seulement quels **outils sont installés**, puis quitte |
+| `--oui` | Confirme d'avance l'autorisation de tester (pour scripts) |
+| `--ia` | **Analyse IA** locale du rapport à la fin |
+| `--chat` | Ouvre le **chat IA** après le scan (implique `--ia`) |
 | `--gui` | Ouvre directement l'interface graphique |
 | `--guide` | Affiche le guide puis quitte |
+
+### Avant de lancer : vérif des outils + autorisation
+
+- **Vérif des outils** — au démarrage (et avec `--check`), Tisseur liste les
+  outils installés (✅) et manquants (❌), avec la commande pour installer ceux
+  qui manquent (adaptée à Termux ou apt). Plus de surprise « command not found ».
+- **Confirmation d'autorisation** — Tisseur demande « As-tu l'autorisation de
+  tester cette cible ? » avant de scanner. Un réflexe éthique ; passe `--oui`
+  dans un script si tu es déjà certain d'avoir le droit.
+
+### Notifications
+
+Quand un scan se termine, Tisseur envoie une **notification système**
+(best-effort) : `termux-notification` sur Android, `notify-send` sur Linux,
+`osascript` sur macOS. Si aucun n'est dispo, rien ne casse.
 
 ### Copier-coller dans l'interface graphique
 
@@ -193,6 +214,40 @@ te laisse activer l'analyse et choisir le moteur/modèle sans taper d'options.
 
 > 💡 Si l'IA n'est pas démarrée, Tisseur te le dit poliment et te donne la
 > commande pour la lancer — le pipeline, lui, a déjà fait son travail.
+
+### 🎯 Rapport de mission (diriger l'IA)
+
+Avec **`--mission`**, tu donnes un objectif à l'IA pour orienter ses réponses :
+
+```bash
+tisseur --target 192.168.56.102 --ia --mission "CTF : trouver le chemin vers le flag"
+tisseur --target 192.168.56.102 --ia --mission "Focus sur les failles web"
+```
+
+La mission est injectée dans l'analyse **et** dans le chat, et notée en haut du
+rapport. Le menu et la GUI ont aussi un champ « Mission ».
+
+### 💬 Chat IA — commande `/chat`
+
+Au lieu d'une seule analyse, tu peux **discuter** avec l'IA à propos du rapport :
+
+```bash
+# Ouvrir le chat tout de suite après le scan
+tisseur --target 192.168.56.102 --chat
+
+# Rouvrir le chat plus tard sur le DERNIER rapport, sans rescanner
+tisseur /chat
+tisseur /chat --ia-modele llama3.2:1b
+```
+
+Dans le chat, pose tes questions (« c'est quoi le port 3306 ? », « par où je
+commence ? ») ; tape **`/quit`** (ou `q`) pour sortir. Le menu interactif a aussi
+l'option **3) Chat IA** (ou tape `/chat` directement au menu).
+
+### 📄 Rapport HTML
+
+Avec **`--html`**, Tisseur écrit aussi un rapport `.html` stylé (thème néon) à
+côté du `.md`, ouvrable dans un navigateur et facile à partager.
 
 ### 📱 Sur téléphone (Termux / LexOS) : petits modèles
 

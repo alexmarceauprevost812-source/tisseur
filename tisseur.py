@@ -36,6 +36,10 @@ le droit explicite de tester (ton lab Metasploitable2, etc.)
 import argparse
 import subprocess
 import sys
+import os
+import glob
+import shutil
+import html
 import datetime
 import threading
 import queue
@@ -190,7 +194,7 @@ STEPS = [
 ]
 
 
-def run_step(module, name, cmd_template, target, url, report_lines, output=print):
+def run_step(module, name, cmd_template, target, url, report_lines, output=print, results=None):
     cmd = cmd_template.format(target=target, url=url)
     coul = MODULE_COULEURS.get(module, ACCENT_HEX)
     # On ne colore (ANSI) que la sortie terminal ; la fenêtre reçoit du texte brut.
@@ -205,6 +209,7 @@ def run_step(module, name, cmd_template, target, url, report_lines, output=print
     report_lines.append(f"Commande : `{cmd}`\n")
     report_lines.append("```")
 
+    out_text = ""
     try:
         # subprocess.run() BLOQUE et attend que la commande soit
         # complètement terminée avant de rendre la main — c'est ça
@@ -216,18 +221,22 @@ def run_step(module, name, cmd_template, target, url, report_lines, output=print
         output(out_text)
         report_lines.append(out_text.strip())
     except subprocess.TimeoutExpired:
-        msg = "⚠️ Étape interrompue (timeout de 10 minutes dépassé)"
-        output(msg)
-        report_lines.append(msg)
+        out_text = "⚠️ Étape interrompue (timeout de 10 minutes dépassé)"
+        output(out_text)
+        report_lines.append(out_text)
     except Exception as e:
-        msg = f"⚠️ Erreur pendant cette étape : {e}"
-        output(msg)
-        report_lines.append(msg)
+        out_text = f"⚠️ Erreur pendant cette étape : {e}"
+        output(out_text)
+        report_lines.append(out_text)
 
     report_lines.append("```")
 
+    if results is not None:
+        results.append({"module": module, "name": name, "cmd": cmd, "output": out_text.strip()})
 
-def run_pipeline(target, url, modules_str, output=print, ia=None):
+
+def run_pipeline(target, url, modules_str, output=print, ia=None,
+                 assume_yes=False, html_out=False, chat=False, mission=""):
     url = url or f"http://{target}"
     wanted_modules = [m.strip() for m in modules_str.split(",")] if modules_str else None
 
@@ -238,15 +247,26 @@ def run_pipeline(target, url, modules_str, output=print, ia=None):
         output("Modules disponibles : " + ", ".join(sorted(set(s[0] for s in STEPS))))
         return None
 
+    tty = (output is print) and sys.stdout.isatty()
+
+    # Confirmation d'autorisation (éthique) avant tout.
+    if not confirmer_autorisation(target, assume_yes=assume_yes, output=output):
+        return None
+
+    # Vérification des outils (avertit sans bloquer).
+    verifier_outils(steps_to_run, output=output)
+
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     report_lines = [f"# Rapport Tisseur — Cible : {target}", f"Généré le {timestamp}\n"]
+    if mission and mission.strip():
+        report_lines.append(f"**Mission :** {mission.strip()}\n")
+    results = []
 
-    tty = (output is print) and sys.stdout.isatty()
     output(colore(f"🧵 Tisseur démarré sur la cible {target}", C_NET, tty))
     output(colore(f"{len(steps_to_run)} étape(s) à exécuter, une par une.", MUTED_HEX, tty) + "\n")
 
     for module, name, cmd_template in steps_to_run:
-        run_step(module, name, cmd_template, target, url, report_lines, output=output)
+        run_step(module, name, cmd_template, target, url, report_lines, output=output, results=results)
 
     filename = (
         f"tisseur_rapport_{target.replace('.', '_')}_"
@@ -261,14 +281,30 @@ def run_pipeline(target, url, modules_str, output=print, ia=None):
 
     # Analyse IA optionnelle : on relit le rapport et on demande à une IA
     # LOCALE de le résumer et de conseiller les prochaines étapes.
+    analyse = None
     if ia:
-        analyse = analyse_ia("\n".join(report_lines), ia, output=output)
+        analyse = analyse_ia("\n".join(report_lines), ia, output=output, mission=mission)
         if analyse:
             with open(filename, "a") as f:
                 f.write("\n\n---\n\n## 🤖 Analyse IA\n\n")
                 f.write(analyse.strip() + "\n")
 
+    # Rapport HTML optionnel.
+    if html_out:
+        filename_html = filename[:-3] + ".html"
+        with open(filename_html, "w") as f:
+            f.write(generer_html(target, timestamp, results, analyse=analyse))
+        output(colore(f"📄 Rapport HTML : {filename_html}", C_DL, tty))
+
+    # Notification de fin (best-effort).
+    notifier("🧵 Tisseur terminé", f"Rapport prêt pour {target}")
+
+    # Chat IA optionnel (terminal seulement : besoin de input()).
+    if chat and ia and tty:
+        chat_ia("\n".join(report_lines), ia, mission=mission)
+
     return filename
+
 
 
 # ============================================================
@@ -292,7 +328,7 @@ PROMPT_IA = """Tu es un mentor en cybersécurité pour le cours « Hacking 101 �
 On te donne le rapport d'un scan de pentest effectué sur un LAB D'ENTRAÎNEMENT
 AUTORISÉ (une machine Metasploitable2 ou équivalente que l'étudiant possède et a
 le droit de tester).
-
+{mission}
 Analyse ce rapport et réponds EN FRANÇAIS, de façon claire et pédagogique :
 
 1. RÉSUMÉ — les hôtes, ports ouverts, services et versions détectés.
@@ -310,42 +346,74 @@ d'instructions pour attaquer des systèmes non autorisés.
 """
 
 
-def analyse_ia(rapport, ia, output=print):
-    """Envoie le rapport à une IA locale et renvoie son analyse (texte).
+def _bloc_mission(mission):
+    """Bloc 'rapport de mission' injecté dans les prompts pour diriger l'IA."""
+    if mission and mission.strip():
+        return ("\nRAPPORT DE MISSION (objectif fixé par l'étudiant — oriente tes "
+                "réponses en fonction) :\n" + mission.strip() + "\n")
+    return ""
 
-    `ia` est un dict : {"moteur": "ollama"|"llamacpp", "modele": str, "url": str}.
-    Renvoie None en cas d'échec (après avoir affiché une explication).
-    """
+
+def _ia_config(ia):
+    """Normalise le dict `ia` -> (moteur, url, modele)."""
     moteur = ia.get("moteur", "ollama")
     defauts = IA_DEFAUTS.get(moteur, IA_DEFAUTS["ollama"])
     url = (ia.get("url") or defauts["url"]).rstrip("/")
     modele = ia.get("modele") or defauts["modele"]
+    return moteur, url, modele
 
+
+def _ia_generate(prompt, ia, timeout=300):
+    """Envoie un prompt à l'IA locale et renvoie le texte. Lève en cas d'échec.
+
+    Partagé par l'analyse automatique et le chat.
+    """
+    moteur, url, modele = _ia_config(ia)
+    if moteur == "ollama":
+        endpoint = f"{url}/api/generate"
+        payload = {"model": modele, "prompt": prompt, "stream": False}
+    else:  # llamacpp
+        endpoint = f"{url}/completion"
+        payload = {"prompt": prompt, "n_predict": 768, "stream": False}
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint, data=data, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+    # Ollama -> "response" ; llama.cpp -> "content"
+    return (body.get("response") or body.get("content") or "").strip()
+
+
+def _ia_message_erreur(moteur, modele, raison, output, tty):
+    """Message d'aide commun quand l'IA locale ne répond pas."""
+    output(colore(f"⚠️ Impossible de joindre l'IA locale ({moteur}) : {raison}", C_DEL, tty))
+    if moteur == "ollama":
+        output("   Démarre Ollama d'abord :  ollama run " + (modele or "llama3"))
+        output("   (installe-le sur https://ollama.com si ce n'est pas fait)")
+    else:
+        output("   Démarre le serveur llama.cpp d'abord :")
+        output("   ./llama-server -m ton_modele.gguf  (écoute sur le port 8080)")
+
+
+def analyse_ia(rapport, ia, output=print, mission=""):
+    """Envoie le rapport à une IA locale et renvoie son analyse (texte).
+
+    `ia` est un dict : {"moteur": "ollama"|"llamacpp", "modele": str, "url": str}.
+    `mission` : objectif optionnel pour orienter l'IA.
+    Renvoie None en cas d'échec (après avoir affiché une explication).
+    """
+    moteur, url, modele = _ia_config(ia)
     tty = (output is print) and sys.stdout.isatty()
     output("")
     output(colore(f"🤖 Analyse IA locale ({moteur}) en cours…", C_GAMER, tty))
 
     # On tronque le rapport pour ne pas dépasser le contexte du modèle.
-    rapport_court = rapport[:12000]
-    prompt = PROMPT_IA.format(rapport=rapport_court)
+    prompt = PROMPT_IA.format(mission=_bloc_mission(mission), rapport=rapport[:12000])
 
     try:
-        if moteur == "ollama":
-            endpoint = f"{url}/api/generate"
-            payload = {"model": modele, "prompt": prompt, "stream": False}
-        else:  # llamacpp
-            endpoint = f"{url}/completion"
-            payload = {"prompt": prompt, "n_predict": 768, "stream": False}
-
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            endpoint, data=data, headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-
-        # Ollama -> "response" ; llama.cpp -> "content"
-        texte = (body.get("response") or body.get("content") or "").strip()
+        texte = _ia_generate(prompt, ia)
         if not texte:
             output(colore("⚠️ L'IA a répondu, mais sans texte exploitable.", C_DEL, tty))
             return None
@@ -357,17 +425,250 @@ def analyse_ia(rapport, ia, output=print):
         return texte
 
     except urllib.error.URLError as e:
-        output(colore(f"⚠️ Impossible de joindre l'IA locale ({moteur}) : {e.reason}", C_DEL, tty))
-        if moteur == "ollama":
-            output("   Démarre Ollama d'abord :  ollama run " + (modele or "llama3"))
-            output("   (installe-le sur https://ollama.com si ce n'est pas fait)")
-        else:
-            output("   Démarre le serveur llama.cpp d'abord :")
-            output("   ./llama-server -m ton_modele.gguf  (écoute sur le port 8080)")
+        _ia_message_erreur(moteur, modele, e.reason, output, tty)
         return None
     except Exception as e:
         output(colore(f"⚠️ Erreur pendant l'analyse IA : {e}", C_DEL, tty))
         return None
+
+
+# ============================================================
+# CHAT IA — commande /chat (terminal)
+# ------------------------------------------------------------
+# Poser des questions à l'IA locale sur un rapport. Tape /quit
+# (ou q) pour sortir.
+# ============================================================
+PROMPT_CHAT = """Tu es un mentor en cybersécurité du cours « Hacking 101 ». Tu
+réponds aux questions d'un étudiant à propos d'un scan fait sur son LAB
+D'ENTRAÎNEMENT AUTORISÉ. Réponds EN FRANÇAIS, bref et pédagogique, en te basant
+sur le rapport ci-dessous. Ne donne pas d'instructions pour attaquer des
+systèmes non autorisés.
+{mission}
+===== RAPPORT =====
+{rapport}
+===== FIN DU RAPPORT =====
+
+Question de l'étudiant : {question}
+Réponse :"""
+
+
+def chat_ia(rapport, ia, mission=""):
+    """Boucle de chat (terminal) : pose des questions à l'IA sur le rapport."""
+    moteur, url, modele = _ia_config(ia)
+    tty = sys.stdout.isatty()
+
+    print(colore("=" * 60, BORDURE_HEX, tty))
+    print(colore(f"💬 Chat IA ({moteur}) — pose tes questions sur le rapport.", C_GAMER, tty))
+    print(colore("   Tape /quit (ou q) pour sortir.", MUTED_HEX, tty))
+    print(colore("=" * 60, BORDURE_HEX, tty))
+
+    rapport_court = rapport[:12000]
+    bloc_mission = _bloc_mission(mission)
+    while True:
+        try:
+            question = input(colore("\n💬 toi > ", C_SCAN, tty)).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not question:
+            continue
+        if question.lower() in ("/quit", "/exit", "q", "quit", "exit"):
+            print(colore("Fin du chat. 🫐", MUTED_HEX, tty))
+            break
+
+        prompt = PROMPT_CHAT.format(mission=bloc_mission, rapport=rapport_court, question=question)
+        try:
+            reponse = _ia_generate(prompt, ia)
+            print(colore("\n🤖 ia  > ", C_GAMER, tty) + (reponse or "(pas de réponse)"))
+        except urllib.error.URLError as e:
+            _ia_message_erreur(moteur, modele, e.reason, print, tty)
+            break
+        except Exception as e:
+            print(colore(f"⚠️ Erreur : {e}", C_DEL, tty))
+
+
+# ============================================================
+# VÉRIFICATION DES OUTILS (avant de lancer)
+# ============================================================
+# outil -> nom du paquet quand il diffère du nom de l'outil (par gestionnaire)
+OUTIL_PAQUET = {
+    "snmpwalk": {"apt": "snmp"},
+    "ping": {"apt": "iputils-ping"},
+}
+
+
+def detect_gestionnaire():
+    """Retourne 'pkg' (Termux), 'apt' (Debian/Kali) ou 'autre'."""
+    if "com.termux" in os.environ.get("PREFIX", "") and shutil.which("pkg"):
+        return "pkg"
+    if shutil.which("apt-get") or shutil.which("apt"):
+        return "apt"
+    return "autre"
+
+
+def _outil_de_commande(cmd_template):
+    """Extrait le nom de l'outil principal d'une commande (gère 'timeout N outil')."""
+    toks = cmd_template.split()
+    if toks and toks[0] == "timeout":
+        for t in toks[1:]:
+            if not t.isdigit():
+                return t
+    return toks[0] if toks else ""
+
+
+def _paquet(outil, gest):
+    return OUTIL_PAQUET.get(outil, {}).get(gest, outil)
+
+
+def verifier_outils(steps, output=print):
+    """Affiche quels outils des étapes sont installés, et comment installer
+    ceux qui manquent. Renvoie la liste des outils manquants."""
+    tty = (output is print) and sys.stdout.isatty()
+    gest = detect_gestionnaire()
+
+    outils = []
+    for _module, _name, cmd in steps:
+        o = _outil_de_commande(cmd)
+        if o and o not in outils:
+            outils.append(o)
+
+    output(colore("🔍 Vérification des outils nécessaires :", C_SCAN, tty))
+    manquants = []
+    for o in outils:
+        if shutil.which(o):
+            output("   " + colore(f"✅ {o}", C_OK, tty))
+        else:
+            manquants.append(o)
+            output("   " + colore(f"❌ {o}  (manquant)", C_ERR, tty))
+
+    if manquants:
+        output("")
+        output(colore(f"{len(manquants)} outil(s) manquant(s) — ces étapes échoueront.", C_DEL, tty))
+        if gest in ("apt", "pkg"):
+            paquets = " ".join(_paquet(o, gest) for o in manquants)
+            cmd_install = ("sudo " if gest == "apt" else "") + f"{gest} install {paquets}"
+            output("   Pour les installer :")
+            output("   " + colore(cmd_install, C_HELP, tty))
+        else:
+            output("   Installe-les avec le gestionnaire de paquets de ton système.")
+    else:
+        output(colore("   Tous les outils sont là. 👌", C_OK, tty))
+    output("")
+    return manquants
+
+
+# ============================================================
+# CONFIRMATION D'AUTORISATION (éthique)
+# ============================================================
+def confirmer_autorisation(target, assume_yes=False, output=print):
+    """Demande confirmation avant de scanner. Renvoie True si on peut lancer."""
+    if assume_yes:
+        return True
+    tty = (output is print) and sys.stdout.isatty()
+    # Non interactif (script) sans --oui : on refuse par prudence.
+    if not (sys.stdin and sys.stdin.isatty()):
+        output(colore("⚠️ Autorisation non confirmée (mode non interactif).", C_DEL, tty))
+        output("   Relance avec --oui SI tu as le droit explicite de tester cette cible.")
+        return False
+    print(colore(
+        f"⚠️  As-tu l'autorisation EXPLICITE de tester {target} ? (o/N) : ", C_DEL, tty
+    ), end="")
+    rep = input().strip().lower()
+    if rep in ("o", "oui", "y", "yes"):
+        return True
+    print(colore("Annulé. Teste seulement ce que tu possèdes ou as le droit de tester.", MUTED_HEX, tty))
+    return False
+
+
+# ============================================================
+# NOTIFICATIONS (best-effort : Termux, Linux, macOS)
+# ============================================================
+def notifier(titre, message):
+    """Notification système si un outil est dispo ; sinon, silencieux."""
+    try:
+        if shutil.which("termux-notification"):
+            subprocess.run(["termux-notification", "--title", titre, "--content", message],
+                           timeout=10, capture_output=True)
+        elif shutil.which("notify-send"):
+            subprocess.run(["notify-send", titre, message], timeout=10, capture_output=True)
+        elif sys.platform == "darwin" and shutil.which("osascript"):
+            subprocess.run(
+                ["osascript", "-e", f'display notification "{message}" with title "{titre}"'],
+                timeout=10, capture_output=True,
+            )
+    except Exception:
+        pass  # une notif qui échoue ne doit jamais casser le pipeline
+
+
+# ============================================================
+# RAPPORT HTML (thème néon LEXOS)
+# ============================================================
+def generer_html(target, timestamp, results, analyse=None):
+    """Construit un rapport HTML stylé à partir des résultats structurés."""
+    def esc(s):
+        return html.escape(s or "")
+
+    sections = []
+    for r in results:
+        coul = MODULE_COULEURS.get(r["module"], ACCENT_HEX)
+        sections.append(f"""
+      <section class="etape">
+        <h2 style="color:{coul}">[{esc(r['module'])}] {esc(r['name'])}</h2>
+        <div class="cmd">$ {esc(r['cmd'])}</div>
+        <pre>{esc(r['output']) or '(aucune sortie)'}</pre>
+      </section>""")
+
+    bloc_ia = ""
+    if analyse:
+        bloc_ia = f"""
+      <section class="etape ia">
+        <h2 style="color:{C_GAMER}">🤖 Analyse IA</h2>
+        <pre>{esc(analyse)}</pre>
+      </section>"""
+
+    return f"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rapport Tisseur — {esc(target)}</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  body {{ background:{NOIR_HEX}; color:{TEXTE_HEX};
+         font-family:ui-monospace,Consolas,monospace; margin:0; padding:24px; }}
+  header {{ border-bottom:1px solid {BORDURE_HEX}; padding-bottom:16px; margin-bottom:16px; }}
+  h1 {{ color:{ACCENT_HEX}; margin:0 0 4px; }}
+  .sign {{ color:{MUTED_HEX}; font-size:.9em; }}
+  .meta {{ color:{C_SCAN}; font-size:.9em; }}
+  .etape {{ background:{NOIR_SIDE_HEX}; border:1px solid {BORDURE_HEX};
+            border-radius:8px; padding:12px 16px; margin:14px 0; }}
+  .etape h2 {{ margin:0 0 8px; font-size:1.05em; }}
+  .cmd {{ color:{MUTED_HEX}; margin-bottom:8px; }}
+  pre {{ background:#070707; color:{TEXTE2_HEX}; padding:12px; border-radius:6px;
+         overflow-x:auto; white-space:pre-wrap; word-break:break-word; margin:0; }}
+  .ia pre {{ border-left:3px solid {C_GAMER}; }}
+  footer {{ color:{MUTED_HEX}; font-size:.85em; margin-top:24px;
+            border-top:1px solid {BORDURE_HEX}; padding-top:12px; }}
+</style>
+</head>
+<body>
+  <header>
+    <h1>🧵 Rapport Tisseur</h1>
+    <div class="meta">Cible : {esc(target)} · Généré le {esc(timestamp)}</div>
+    <div class="sign">{esc(SIGNATURE)}</div>
+  </header>
+  {''.join(sections)}
+  {bloc_ia}
+  <footer>⚠️ À utiliser seulement sur des machines que tu possèdes ou que t'as le droit de tester.</footer>
+</body>
+</html>"""
+
+
+def dernier_rapport():
+    """Renvoie le chemin du rapport .md le plus récent (ou None)."""
+    fichiers = sorted(glob.glob("tisseur_rapport_*.md"), key=os.path.getmtime, reverse=True)
+    return fichiers[0] if fichiers else None
+
 
 
 
@@ -429,12 +730,9 @@ def show_guide_terminal():
 # ============================================================
 # MENU INTERACTIF (terminal)
 # ============================================================
-def _demander_ia():
-    """Demande (terminal) si on veut une analyse IA, et avec quel moteur."""
-    rep = input("Analyse IA locale à la fin ? (o/N) : ").strip().lower()
-    if rep not in ("o", "oui", "y", "yes"):
-        return None
-    moteur = input("Moteur — 1) Ollama (défaut)  2) llama.cpp : ").strip()
+def _demander_moteur_ia():
+    """Demande le moteur IA et le modèle (terminal). Renvoie un dict `ia`."""
+    moteur = input("Moteur IA — 1) Ollama (défaut)  2) llama.cpp : ").strip()
     moteur = "llamacpp" if moteur == "2" else "ollama"
     modele = None
     if moteur == "ollama":
@@ -442,35 +740,68 @@ def _demander_ia():
     return {"moteur": moteur, "modele": modele, "url": None}
 
 
+def _oui(question):
+    return input(question).strip().lower() in ("o", "oui", "y", "yes")
+
+
+def _demander_options():
+    """Demande les options de fin de scan. Renvoie (ia, html, chat, mission)."""
+    mission = input("Rapport de mission / objectif (optionnel, pour diriger l'IA) : ").strip()
+    ia = _demander_moteur_ia() if _oui("Analyse IA locale à la fin ? (o/N) : ") else None
+    html_out = _oui("Générer aussi un rapport HTML ? (o/N) : ")
+    chat = bool(ia) and _oui("Ouvrir le chat IA après le scan ? (o/N) : ")
+    return ia, html_out, chat, mission
+
+
+def lancer_chat_sur_dernier_rapport(ia=None, mission=""):
+    """Ouvre le chat IA sur le rapport le plus récent (commande /chat)."""
+    tty = sys.stdout.isatty()
+    path = dernier_rapport()
+    if not path:
+        print(colore("Aucun rapport trouvé — lance d'abord un scan.", C_DEL, tty))
+        return
+    print(colore(f"Rapport chargé : {path}", MUTED_HEX, tty))
+    if not mission:
+        mission = input("Rapport de mission / objectif (optionnel) : ").strip()
+    if ia is None:
+        ia = _demander_moteur_ia()
+    with open(path) as f:
+        rapport = f.read()
+    chat_ia(rapport, ia, mission=mission)
+
+
 def interactive_menu():
     print_banner()
     while True:
         print("1) Lancer le pipeline complet")
         print("2) Choisir des modules spécifiques")
-        print("3) Interface graphique")
-        print("4) Guide / Aide")
-        print("5) Quitter")
+        print("3) Chat IA sur le dernier rapport  (/chat)")
+        print("4) Interface graphique")
+        print("5) Guide / Aide")
+        print("6) Quitter")
         choix = input("\n> ").strip()
 
         if choix == "1":
             target = input("IP de la cible : ").strip()
             if target:
-                ia = _demander_ia()
-                run_pipeline(target, None, None, ia=ia)
+                ia, html_out, chat, mission = _demander_options()
+                run_pipeline(target, None, None, ia=ia, html_out=html_out, chat=chat, mission=mission)
             break
         elif choix == "2":
             target = input("IP de la cible : ").strip()
             mods = input("Modules (séparés par virgule, ex: Reconnaissance,Scanning) : ").strip()
             if target:
-                ia = _demander_ia()
-                run_pipeline(target, None, mods or None, ia=ia)
+                ia, html_out, chat, mission = _demander_options()
+                run_pipeline(target, None, mods or None, ia=ia, html_out=html_out, chat=chat, mission=mission)
             break
-        elif choix == "3":
+        elif choix == "3" or choix.lower() == "/chat":
+            lancer_chat_sur_dernier_rapport()
+        elif choix == "4":
             launch_gui()
             break
-        elif choix == "4":
-            show_guide_terminal()
         elif choix == "5":
+            show_guide_terminal()
+        elif choix == "6":
             print("À la prochaine !")
             break
         else:
@@ -531,6 +862,13 @@ def launch_gui():
             url_entry.grid(row=1, column=1, sticky="w", padx=8, pady=3)
             self._add_context_menu(url_entry)
 
+            tk.Label(form, text="Mission (optionnel) :", fg=TEXTE_HEX, bg=NOIR_HEX).grid(row=2, column=0, sticky="w")
+            self.mission_var = tk.StringVar()
+            mission_entry = tk.Entry(form, textvariable=self.mission_var, width=28, **entry_style)
+            mission_entry.grid(row=2, column=1, sticky="w", padx=8, pady=3)
+            self._add_context_menu(mission_entry)
+            tk.Label(form, text="(objectif donné à l'IA)", fg=MUTED_HEX, bg=NOIR_HEX).grid(row=2, column=2, sticky="w")
+
             mod_frame = tk.LabelFrame(root, text="Modules", fg=C_SCAN, bg=NOIR_HEX, labelanchor="nw")
             mod_frame.pack(fill="x", padx=16, pady=8)
 
@@ -563,6 +901,13 @@ def launch_gui():
             tk.Label(ia_frame, text="Modèle :", fg=TEXTE_HEX, bg=NOIR_HEX).grid(row=1, column=2, padx=6, pady=4, sticky="w")
             self.ia_modele_var = tk.StringVar(value="llama3")
             tk.Entry(ia_frame, textvariable=self.ia_modele_var, width=16, **entry_style).grid(row=1, column=3, padx=4, pady=4, sticky="w")
+
+            self.html_var = tk.BooleanVar(value=False)
+            tk.Checkbutton(
+                ia_frame, text="Générer aussi un rapport HTML",
+                variable=self.html_var, fg=C_DL, bg=NOIR_HEX,
+                selectcolor="#161616", activebackground=NOIR_HEX, activeforeground=C_DL,
+            ).grid(row=2, column=0, columnspan=4, padx=6, pady=(0, 4), sticky="w")
 
             btn_frame = tk.Frame(root, bg=NOIR_HEX)
             btn_frame.pack(fill="x", padx=16, pady=4)
@@ -666,6 +1011,16 @@ def launch_gui():
                 return
             modules_str = ",".join(selected)
 
+            # Confirmation d'autorisation (éthique).
+            if not messagebox.askyesno(
+                "Autorisation",
+                f"As-tu l'autorisation EXPLICITE de tester {target} ?\n\n"
+                "Teste seulement ce que tu possèdes ou as le droit de tester.",
+            ):
+                return
+
+            mission = self.mission_var.get().strip()
+            html_out = self.html_var.get()
             ia = None
             if self.ia_var.get():
                 ia = {
@@ -677,15 +1032,30 @@ def launch_gui():
             self.launch_btn.config(state="disabled")
             self.output.delete("1.0", "end")
 
-            threading.Thread(target=self._run, args=(target, url, modules_str, ia), daemon=True).start()
+            threading.Thread(
+                target=self._run,
+                args=(target, url, modules_str, ia, html_out, mission),
+                daemon=True,
+            ).start()
 
-        def _run(self, target, url, modules_str, ia=None):
-            run_pipeline(target, url, modules_str, output=self.log, ia=ia)
+        def _run(self, target, url, modules_str, ia=None, html_out=False, mission=""):
+            # assume_yes=True : l'autorisation a déjà été confirmée par le dialogue.
+            run_pipeline(target, url, modules_str, output=self.log, ia=ia,
+                         assume_yes=True, html_out=html_out, mission=mission)
             self.root.after(0, lambda: self.launch_btn.config(state="normal"))
 
     root = tk.Tk()
     TisseurApp(root)
     root.mainloop()
+
+
+def _argv_valeur(flag, defaut=None):
+    """Récupère la valeur qui suit un flag dans sys.argv (pour /chat autonome)."""
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return defaut
 
 
 def main():
@@ -705,15 +1075,37 @@ def main():
         show_guide_terminal()
         return
 
+    # /chat tout seul -> chat IA sur le dernier rapport, sans relancer de scan.
+    if "/chat" in sys.argv:
+        print_banner()
+        ia = {
+            "moteur": _argv_valeur("--ia-moteur", "ollama"),
+            "modele": _argv_valeur("--ia-modele", None),
+            "url": _argv_valeur("--ia-url", None),
+        }
+        mission = _argv_valeur("--mission", "")
+        lancer_chat_sur_dernier_rapport(ia=ia, mission=mission)
+        return
+
     parser = argparse.ArgumentParser(description="Tisseur — pipeline de pentest, Hacking 101")
-    parser.add_argument("--target", required=True, help="IP ou host de la cible")
+    parser.add_argument("--target", default=None, help="IP ou host de la cible")
     parser.add_argument("--url", default=None, help="URL pour les outils web (défaut: http://<target>)")
     parser.add_argument("--modules", default=None,
                          help="Liste de modules séparés par virgule (défaut: tous). "
                               "Ex: Reconnaissance,Scanning")
     parser.add_argument("--guide", action="store_true", help="Affiche le guide puis quitte")
+    parser.add_argument("--check", action="store_true",
+                         help="Vérifie seulement quels outils sont installés, puis quitte")
+    parser.add_argument("--html", action="store_true",
+                         help="Génère aussi un rapport HTML en plus du .md")
+    parser.add_argument("--oui", action="store_true",
+                         help="Confirme d'avance l'autorisation de tester (pour scripts)")
+    parser.add_argument("--mission", default="",
+                         help="Rapport de mission / objectif, pour diriger l'IA")
     parser.add_argument("--ia", action="store_true",
                          help="Analyse le rapport avec une IA LOCALE à la fin (conseils)")
+    parser.add_argument("--chat", action="store_true",
+                         help="Ouvre le chat IA après le scan (implique --ia)")
     parser.add_argument("--ia-moteur", default="ollama", choices=["ollama", "llamacpp"],
                          help="Moteur d'IA locale (défaut: ollama)")
     parser.add_argument("--ia-modele", default=None,
@@ -725,11 +1117,22 @@ def main():
 
     print_banner()
 
+    # --check : juste vérifier les outils et quitter.
+    if args.check:
+        wanted = [m.strip() for m in args.modules.split(",")] if args.modules else None
+        steps = [s for s in STEPS if wanted is None or s[0] in wanted]
+        verifier_outils(steps)
+        return
+
+    if not args.target:
+        parser.error("--target est requis (sauf avec --guide, --check, --gui ou /chat)")
+
     ia = None
-    if args.ia:
+    if args.ia or args.chat:
         ia = {"moteur": args.ia_moteur, "modele": args.ia_modele, "url": args.ia_url}
 
-    run_pipeline(args.target, args.url, args.modules, ia=ia)
+    run_pipeline(args.target, args.url, args.modules, ia=ia,
+                 assume_yes=args.oui, html_out=args.html, chat=args.chat, mission=args.mission)
 
 
 if __name__ == "__main__":

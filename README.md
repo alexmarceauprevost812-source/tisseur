@@ -53,7 +53,32 @@ cd tisseur
 git pull origin claude/nice-goldberg-saufsc
 ```
 
-### 2. Dépendances
+### 2. Kit d'installation (un script par plateforme)
+
+Une fois le dossier téléchargé, lance le script qui correspond à ton système.
+Il installe les dépendances **et** crée la commande `tisseur` (qui trouve le
+dossier toute seule — plus besoin de taper le chemin complet).
+
+| Système | Commande |
+|---|---|
+| **Linux** (Kali, Debian, Ubuntu…) | `bash install-linux.sh` |
+| **Termux** (Android) | `bash install-termux.sh` |
+| **LexOS** (Android) | `bash install-lexos.sh` |
+| **Windows** (PowerShell) | `powershell -ExecutionPolicy Bypass -File install-windows.ps1` |
+
+Après, tu lances l'outil de n'importe où :
+
+```bash
+tisseur                           # menu interactif
+tisseur --target 192.168.56.102   # lancer sur une cible
+tisseur --guide                   # afficher le guide
+```
+
+> 💡 Les scripts sont **idempotents** : tu peux les relancer sans danger (par
+> exemple si tu déplaces le dossier, relance le script pour corriger le
+> raccourci).
+
+### 3. Dépendances (si tu installes à la main)
 
 - **Python 3** — déjà présent sur Kali/Linux ; aucun paquet externe pour les
   modes terminal.
@@ -61,9 +86,13 @@ git pull origin claude/nice-goldberg-saufsc
   ```bash
   sudo apt install python3-tk
   ```
+  ⚠️ L'interface graphique **ne marche pas sur Termux/LexOS** (Android n'a pas
+  d'écran graphique X11) : reste en mode terminal.
 - **Les outils de pentest** (`nmap`, `masscan`, `hydra`, `nikto`, `enum4linux`,
   `gobuster`, `sqlmap`, `snmpwalk`, `tcpdump`…) — préinstallés sur **Kali
-  Linux**. Tisseur ne fait que les lancer, il ne les installe pas.
+  Linux**. Tisseur ne fait que les lancer, il ne les installe pas. Sur Termux et
+  Windows, surtout `nmap` est disponible ; pour le kit complet, Kali reste le
+  meilleur choix.
 
 ---
 

@@ -57,7 +57,9 @@ def main():
     parser.add_argument("--check", action="store_true",
                          help="Vérifie seulement quels outils sont installés, puis quitte")
     parser.add_argument("--html", action="store_true",
-                         help="Génère aussi un rapport HTML en plus du .md")
+                         help="Génère aussi un rapport HTML (thème néon) en plus du .md")
+    parser.add_argument("--html-pro", action="store_true",
+                         help="Génère un rapport HTML thème PRO (sobre, corporatif)")
     parser.add_argument("--oui", action="store_true",
                          help="Confirme d'avance l'autorisation de tester (pour scripts)")
     parser.add_argument("--mission", default="",
@@ -91,5 +93,9 @@ def main():
     if args.ia or args.chat:
         ia = {"moteur": args.ia_moteur, "modele": args.ia_modele, "url": args.ia_url}
 
+    html_out = args.html or args.html_pro
+    html_theme = "pro" if args.html_pro else "neon"
+
     run_pipeline(args.target, args.url, args.modules, ia=ia,
-                 assume_yes=args.oui, html_out=args.html, chat=args.chat, mission=args.mission)
+                 assume_yes=args.oui, html_out=html_out, chat=args.chat,
+                 mission=args.mission, html_theme=html_theme)

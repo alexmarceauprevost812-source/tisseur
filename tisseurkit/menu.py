@@ -25,12 +25,14 @@ def _oui(question):
 
 
 def _demander_options():
-    """Demande les options de fin de scan. Renvoie (ia, html, chat, mission)."""
+    """Demande les options de fin de scan. Renvoie (ia, html, chat, mission, theme)."""
     mission = input("Rapport de mission / objectif (optionnel, pour diriger l'IA) : ").strip()
     ia = _demander_moteur_ia() if _oui("Analyse IA locale à la fin ? (o/N) : ") else None
-    html_out = _oui("Générer aussi un rapport HTML ? (o/N) : ")
+    rep = input("Rapport HTML ? 0) non (défaut)  1) néon  2) pro : ").strip()
+    html_out = rep in ("1", "2")
+    theme = "pro" if rep == "2" else "neon"
     chat = bool(ia) and _oui("Ouvrir le chat IA après le scan ? (o/N) : ")
-    return ia, html_out, chat, mission
+    return ia, html_out, chat, mission, theme
 
 
 def lancer_chat_sur_dernier_rapport(ia=None, mission=""):
@@ -64,15 +66,17 @@ def interactive_menu():
         if choix == "1":
             target = input("IP de la cible : ").strip()
             if target:
-                ia, html_out, chat, mission = _demander_options()
-                run_pipeline(target, None, None, ia=ia, html_out=html_out, chat=chat, mission=mission)
+                ia, html_out, chat, mission, theme = _demander_options()
+                run_pipeline(target, None, None, ia=ia, html_out=html_out, chat=chat,
+                             mission=mission, html_theme=theme)
             break
         elif choix == "2":
             target = input("IP de la cible : ").strip()
             mods = input("Modules (séparés par virgule, ex: Reconnaissance,Scanning) : ").strip()
             if target:
-                ia, html_out, chat, mission = _demander_options()
-                run_pipeline(target, None, mods or None, ia=ia, html_out=html_out, chat=chat, mission=mission)
+                ia, html_out, chat, mission, theme = _demander_options()
+                run_pipeline(target, None, mods or None, ia=ia, html_out=html_out, chat=chat,
+                             mission=mission, html_theme=theme)
             break
         elif choix == "3" or choix.lower() == "/chat":
             lancer_chat_sur_dernier_rapport()

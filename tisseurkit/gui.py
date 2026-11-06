@@ -104,10 +104,17 @@ def launch_gui():
 
             self.html_var = tk.BooleanVar(value=False)
             tk.Checkbutton(
-                ia_frame, text="Générer aussi un rapport HTML",
+                ia_frame, text="Rapport HTML",
                 variable=self.html_var, fg=C_DL, bg=NOIR_HEX,
                 selectcolor="#161616", activebackground=NOIR_HEX, activeforeground=C_DL,
-            ).grid(row=2, column=0, columnspan=4, padx=6, pady=(0, 4), sticky="w")
+            ).grid(row=2, column=0, columnspan=2, padx=6, pady=(0, 4), sticky="w")
+
+            self.html_pro_var = tk.BooleanVar(value=False)
+            tk.Checkbutton(
+                ia_frame, text="thème pro (sobre/corporatif)",
+                variable=self.html_pro_var, fg=C_DL, bg=NOIR_HEX,
+                selectcolor="#161616", activebackground=NOIR_HEX, activeforeground=C_DL,
+            ).grid(row=2, column=2, columnspan=2, padx=6, pady=(0, 4), sticky="w")
 
             btn_frame = tk.Frame(root, bg=NOIR_HEX)
             btn_frame.pack(fill="x", padx=16, pady=4)
@@ -220,7 +227,9 @@ def launch_gui():
                 return
 
             mission = self.mission_var.get().strip()
-            html_out = self.html_var.get()
+            html_pro = self.html_pro_var.get()
+            html_out = self.html_var.get() or html_pro
+            html_theme = "pro" if html_pro else "neon"
             ia = None
             if self.ia_var.get():
                 ia = {
@@ -234,14 +243,14 @@ def launch_gui():
 
             threading.Thread(
                 target=self._run,
-                args=(target, url, modules_str, ia, html_out, mission),
+                args=(target, url, modules_str, ia, html_out, mission, html_theme),
                 daemon=True,
             ).start()
 
-        def _run(self, target, url, modules_str, ia=None, html_out=False, mission=""):
+        def _run(self, target, url, modules_str, ia=None, html_out=False, mission="", html_theme="neon"):
             # assume_yes=True : l'autorisation a déjà été confirmée par le dialogue.
             run_pipeline(target, url, modules_str, output=self.log, ia=ia,
-                         assume_yes=True, html_out=html_out, mission=mission)
+                         assume_yes=True, html_out=html_out, mission=mission, html_theme=html_theme)
             self.root.after(0, lambda: self.launch_btn.config(state="normal"))
 
     root = tk.Tk()

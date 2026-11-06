@@ -50,7 +50,8 @@ def run_step(module, name, cmd_template, target, url, report_lines, output=print
 
 
 def run_pipeline(target, url, modules_str, output=print, ia=None,
-                 assume_yes=False, html_out=False, chat=False, mission=""):
+                 assume_yes=False, html_out=False, chat=False, mission="",
+                 html_theme="neon"):
     url = url or f"http://{target}"
     wanted_modules = [m.strip() for m in modules_str.split(",")] if modules_str else None
 
@@ -103,12 +104,15 @@ def run_pipeline(target, url, modules_str, output=print, ia=None,
                 f.write("\n\n---\n\n## 🤖 Analyse IA\n\n")
                 f.write(analyse.strip() + "\n")
 
-    # Rapport HTML optionnel.
+    # Rapport HTML optionnel (thème néon ou pro).
     if html_out:
-        filename_html = filename[:-3] + ".html"
+        suffixe = "_pro.html" if html_theme == "pro" else ".html"
+        filename_html = filename[:-3] + suffixe
         with open(filename_html, "w") as f:
-            f.write(generer_html(target, timestamp, results, analyse=analyse))
-        output(colore(f"📄 Rapport HTML : {filename_html}", C_DL, tty))
+            f.write(generer_html(target, timestamp, results, analyse=analyse,
+                                 theme=html_theme, mission=mission))
+        label = "pro" if html_theme == "pro" else "néon"
+        output(colore(f"📄 Rapport HTML ({label}) : {filename_html}", C_DL, tty))
 
     # Notification de fin (best-effort).
     notifier("🧵 Tisseur terminé", f"Rapport prêt pour {target}")

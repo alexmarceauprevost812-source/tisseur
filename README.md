@@ -128,7 +128,8 @@ python3 tisseur.py --guide
 | `--url <url>` | URL pour les outils web (défaut : `http://<target>`) |
 | `--modules <liste>` | Modules séparés par virgule (défaut : tous). Ex : `Reconnaissance,Scanning` |
 | `--mission "<texte>"` | Rapport de mission / objectif, pour **diriger l'IA** |
-| `--html` | Génère aussi un **rapport HTML** stylé en plus du `.md` |
+| `--html` | Génère aussi un **rapport HTML** néon en plus du `.md` |
+| `--html-pro` | Rapport HTML **thème pro** (sobre, pour une compagnie) |
 | `--check` | Vérifie seulement quels **outils sont installés**, puis quitte |
 | `--oui` | Confirme d'avance l'autorisation de tester (pour scripts) |
 | `--ia` | **Analyse IA** locale du rapport à la fin |
@@ -247,7 +248,18 @@ l'option **3) Chat IA** (ou tape `/chat` directement au menu).
 ### 📄 Rapport HTML
 
 Avec **`--html`**, Tisseur écrit aussi un rapport `.html` stylé (thème néon) à
-côté du `.md`, ouvrable dans un navigateur et facile à partager.
+côté du `.md`, ouvrable dans un navigateur et facile à partager. Avec
+**`--html-pro`**, c'est un thème **sobre/corporatif** (fond clair, bleu marine),
+parfait pour présenter à une compagnie.
+
+```bash
+tisseur --target 192.168.56.102 --html       # thème néon
+tisseur --target 192.168.56.102 --html-pro    # thème pro (fichier *_pro.html)
+```
+
+> 🛡️ **Plafond de taille** : les sorties très longues sont tronquées dans le
+> HTML (20 000 caractères par étape) avec un avis, pour éviter un fichier géant.
+> Le rapport `.md`, lui, garde **toujours** la sortie complète.
 
 ### 📱 Sur téléphone (Termux / LexOS) : petits modèles
 

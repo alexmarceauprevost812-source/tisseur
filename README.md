@@ -194,6 +194,27 @@ te laisse activer l'analyse et choisir le moteur/modèle sans taper d'options.
 > 💡 Si l'IA n'est pas démarrée, Tisseur te le dit poliment et te donne la
 > commande pour la lancer — le pipeline, lui, a déjà fait son travail.
 
+### 📱 Sur téléphone (Termux / LexOS) : petits modèles
+
+Ollama tourne sur Android, mais la RAM d'un téléphone est limitée : le modèle
+`llama3` (8 milliards de paramètres) est souvent **trop gros** et plante. Utilise
+un **petit modèle** à la place :
+
+```bash
+ollama run llama3.2:1b      # léger, bon compromis
+ollama run qwen2.5:0.5b     # encore plus petit, pour les appareils serrés
+```
+
+Puis lance Tisseur en pointant vers ce modèle :
+
+```bash
+tisseur --target 192.168.56.102 --ia --ia-modele llama3.2:1b
+```
+
+> Règle du pouce : vise un modèle **plus petit que la moitié de ta RAM libre**.
+> Un petit modèle répond moins finement qu'un gros, mais pour résumer un rapport
+> et suggérer des pistes, ça fait très bien la job.
+
 ---
 
 ## Prérequis

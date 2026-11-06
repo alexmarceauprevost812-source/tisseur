@@ -1,0 +1,17 @@
+# Cache et bytecode Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Rapports générés par Tisseur
+tisseur_rapport_*.md
+tisseur_rapport_*.html
+
+# Mémoire du Veilleur (liste des appareils connus)
+veilleur_connus.json
+
+# Captures réseau générées par le module tcpdump
+*.pcap
+
+# Fichiers système
+.DS_Store

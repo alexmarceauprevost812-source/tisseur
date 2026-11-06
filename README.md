@@ -309,6 +309,36 @@ pipeline sur un thread en arrière-plan et affiche la sortie au fur et à mesure
 
 ---
 
+## 🛡️ Le Veilleur — gardien de ton réseau
+
+Si Tisseur **audite une cible**, **Le Veilleur protège ton propre réseau**. Il
+regarde qui est connecté chez toi et t'**avertit dès qu'un appareil inconnu
+apparaît**. 100 % défensif — à utiliser sur **ton** réseau seulement.
+
+```bash
+python3 veilleur.py                 # un scan ; la 1re fois, établit la base
+python3 veilleur.py --watch         # surveille en continu (scan aux 60 s)
+python3 veilleur.py --watch 30      # ... aux 30 secondes
+python3 veilleur.py --liste         # montre les appareils connus
+python3 veilleur.py --ia            # l'IA locale commente les inconnus
+python3 veilleur.py --reseau 192.168.0.0/24   # préciser le réseau
+```
+
+Comment ça marche :
+1. Il scanne ton réseau local (`arp-scan`, sinon `nmap -sn`, sinon la table ARP).
+2. La **première fois**, il mémorise les appareils actuels comme « de confiance »
+   (dans `veilleur_connus.json`).
+3. Ensuite, dès qu'un **appareil inconnu** (nouvelle adresse MAC) apparaît →
+   🚨 alerte + **notification système** (la même que Tisseur).
+4. Avec `--ia`, l'IA locale te dit à quoi ressemble l'inconnu (fabricant probable)
+   pour t'aider à décider s'il est louche.
+
+> Le Veilleur **réutilise les pièces de Tisseur** : thème néon, notifications et
+> IA locale. Les installateurs créent aussi une commande **`veilleur`** à côté de
+> `tisseur`. `arp-scan`/`nmap` demandent souvent les droits root (`sudo`).
+
+---
+
 ## Structure du code
 
 Le code est découpé en **modules** (une pièce par fichier) dans le dossier

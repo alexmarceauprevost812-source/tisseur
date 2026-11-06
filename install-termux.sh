@@ -36,6 +36,13 @@ exec python "$DIR/tisseur.py" "\$@"
 FIN
 chmod +x "$PREFIX/bin/tisseur"
 
+# Commande 'veilleur' (gardien de ton réseau)
+cat > "$PREFIX/bin/veilleur" <<FIN
+#!$PREFIX/bin/bash
+exec python "$DIR/veilleur.py" "\$@"
+FIN
+chmod +x "$PREFIX/bin/veilleur"
+
 echo
 echo "✅ Terminé !"
 echo
